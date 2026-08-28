@@ -1,0 +1,9 @@
+{
+  "name": "@terrain-nerd/pipeline",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build:data": "node src/build.ts"
+  }
+}

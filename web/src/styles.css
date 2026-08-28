@@ -1,0 +1,99 @@
+:root {
+  --muted: #5d6773;
+  --accent: #2f6f4f;
+  --right: #1f9d55;
+  --wrong: #d64545;
+  --miss: #e0921a;
+
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: #1d232b;
+  background: #eceee8;
+  -webkit-text-size-adjust: 100%;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  overscroll-behavior: none;
+}
+
+/* MapLibre's controls default to a blue focus ring that clashes with the map. */
+.maplibregl-ctrl-attrib { font-size: 11px; }
+
+/*
+ * Feature name labels. Created imperatively as MapLibre markers, so these
+ * styles have to live outside any component's scoped CSS.
+ */
+.map-label {
+  transform: translateY(-8px);
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  animation: label-in 140ms ease-out;
+}
+
+.map-label--wrong { background: var(--miss); }
+.map-label--reveal {
+  background: var(--wrong);
+  font-size: 0.95rem;
+  padding: 0.28rem 0.65rem;
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+@keyframes label-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(-8px); }
+}
+
+/* Expanding ring that draws the eye to a revealed feature. */
+.map-pulse {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+.map-pulse::before,
+.map-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid var(--wrong);
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+
+.map-pulse::after {
+  animation-delay: 0.7s;
+}
+
+@keyframes pulse-ring {
+  from { transform: scale(0.5); opacity: 0.9; }
+  to { transform: scale(4.5); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-pulse::before,
+  .map-pulse::after { animation: none; transform: scale(2.4); opacity: 0.65; }
+}
+
+/*
+ * Persistent labels on already-answered features: quieter than the feedback
+ * ones, and tinted inline by how many tries the feature took.
+ */
+.map-label--answered {
+  font-size: 0.72rem;
+  font-weight: 550;
+  padding: 0.12rem 0.38rem;
+  opacity: 0.92;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  animation: none;
+}
+
+/* The flashing answer: pinned above everything else on the map. */
+.map-label--reveal { z-index: 3; }

@@ -1,0 +1,14 @@
+{
+  "name": "terrain-nerd",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["pipeline", "web"],
+  "scripts": {
+    "build:data": "npm run build:data -w pipeline --",
+    "dev": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "preview": "npm run preview -w web",
+    "test": "npm test -w web"
+  }
+}

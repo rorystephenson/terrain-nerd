@@ -1,0 +1,25 @@
+{
+  "name": "@terrain-nerd/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --test src/lib/*.test.ts"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.6.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^26.4.0",
+    "svelte": "^5.20.0",
+    "svelte-check": "^4.1.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}
