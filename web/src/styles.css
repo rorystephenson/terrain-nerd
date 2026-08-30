@@ -97,3 +97,69 @@ body {
 
 /* The flashing answer: pinned above everything else on the map. */
 .map-label--reveal { z-index: 3; }
+
+/*
+ * Builder chrome. Like the play-mode labels these are MapLibre markers created
+ * imperatively, so they cannot live in a component's scoped CSS.
+ */
+.map-label--picked {
+  background: #1f7a8c;
+  animation: none;
+}
+.map-label--picked.is-hover {
+  background: #1d232b;
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+/*
+ * Settlement names: an orientation aid, not an answer. Deliberately quieter
+ * than a feature label — light plate, dark text, no shadow — so they read as
+ * part of the basemap rather than as something the quiz is telling you.
+ */
+/*
+ * Dark text in a white halo, the way a printed topo map sets its place names.
+ *
+ * A filled label box is legible but it punches an opaque hole in the terrain,
+ * and at village density that is a scatter of stickers over the relief. A halo
+ * lifts the text off any background — pale valley floor or dark rock — while
+ * letting the map show through between the letters. `paint-order` keeps the
+ * stroke behind the glyph so the letterforms stay sharp; the text-shadow ring
+ * is the fallback where that is unsupported.
+ */
+.map-place {
+  transform: translateY(-4px);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #2b3138;
+  pointer-events: none;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 3px rgba(255, 255, 255, 0.92);
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.95),
+    0 0 3px rgba(255, 255, 255, 0.95);
+}
+/* Bigger places read louder, the way they would on a printed map. */
+.map-place--r1 { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.01em; }
+.map-place--r2 { font-size: 0.84rem; font-weight: 700; }
+.map-place--r4 { font-size: 0.7rem; font-weight: 500; color: #414852; }
+
+/* Marks a feature the user decided about by hand, so locks are visible at a glance. */
+.map-pin {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transform: translate(11px, -11px);
+}
+.map-pin--in { background: #1f7a8c; }
+.map-pin--out {
+  background: #8a94a2;
+  /* A bar through it: "I said no to this one", distinct from merely filtered out. */
+  background-image: linear-gradient(
+    45deg,
+    transparent 42%, #fff 42%, #fff 58%, transparent 58%
+  );
+}

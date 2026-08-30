@@ -4,13 +4,11 @@ import {
   bboxUnion,
   lineLengthKm,
   midpointOfLine,
-  pointInBoundary,
   type BBox,
-  type Boundary,
   type LonLat,
 } from './geo.ts';
-import type { FeatureType } from './featureTypes.ts';
-import type { OverpassElement } from './overpass.ts';
+import type { FeatureKind, KindId } from './featureTypes.ts';
+import type { RawElement } from './source.ts';
 
 export type QuizFeature = {
   type: 'Feature';
@@ -22,21 +20,18 @@ export type QuizFeature = {
     | { type: 'Point'; coordinates: LonLat };
   properties: {
     name: string;
+    kind: KindId;
     lengthKm: number;
     /** Where to hang a label for this feature: a point on the feature itself. */
     anchor: LonLat;
+    /** 0-100 percentile within the kind. Set for scored kinds only. */
+    popularity?: number;
     wikidata?: string;
     ele?: number;
   };
 };
 
-export type BuildStats = {
-  fetched: number;
-  named: number;
-  merged: number;
-  inRegion: number;
-  aboveFloor: number;
-};
+export type BuildStats = { named: number; merged: number };
 
 /** A single OSM element reduced to the parts the pipeline cares about. */
 type RawFeature = {
@@ -47,31 +42,22 @@ type RawFeature = {
   bbox: BBox;
 };
 
-const toLonLat = (p: { lat: number; lon: number }): LonLat => [p.lon, p.lat];
-
 /** Names differing only in case or spacing are the same valley to a human. */
 export const normalizeName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, ' ');
 
-function extractGeometry(element: OverpassElement): LonLat[] | null {
-  if (element.geometry?.length) return element.geometry.map(toLonLat);
-  if (element.center) return [toLonLat(element.center)];
-  if (element.lat !== undefined && element.lon !== undefined) return [[element.lon, element.lat]];
-  return null;
-}
-
-function toRawFeatures(elements: OverpassElement[]): RawFeature[] {
+function toRawFeatures(elements: RawElement[], kind: KindId): RawFeature[] {
   const raw: RawFeature[] = [];
   for (const element of elements) {
-    const name = element.tags?.name?.trim();
-    if (!name) continue;
-    const coords = extractGeometry(element);
-    if (!coords?.length) continue;
+    const name = element.tags.name?.trim();
+    if (!name || element.coords.length === 0) continue;
     raw.push({
-      osmId: `${element.type}/${element.id}`,
+      // Namespaced by kind: a built quiz mixes kinds in one id list, and
+      // osmium's `w338446899` alone is not unique across the pool.
+      osmId: `${kind}/${element.id}`,
       name,
-      tags: element.tags ?? {},
-      parts: [coords],
-      bbox: bboxOf(coords),
+      tags: element.tags,
+      parts: [element.coords],
+      bbox: bboxOf(element.coords),
     });
   }
   return raw;
@@ -106,14 +92,14 @@ function clusterByProximity(group: RawFeature[], gapKm: number): RawFeature[][] 
   return clusters;
 }
 
-function clusterToFeature(cluster: RawFeature[], type: FeatureType): QuizFeature {
+function clusterToFeature(cluster: RawFeature[], kind: FeatureKind): QuizFeature {
   const parts = cluster.flatMap((member) => member.parts);
   const tags = Object.assign({}, ...cluster.map((member) => member.tags)) as Record<string, string>;
   const lengthKm =
-    type.geometry === 'line' ? parts.reduce((sum, part) => sum + lineLengthKm(part), 0) : 0;
+    kind.geometry === 'line' ? parts.reduce((sum, part) => sum + lineLengthKm(part), 0) : 0;
 
   const geometry: QuizFeature['geometry'] =
-    type.geometry === 'point'
+    kind.geometry === 'point'
       ? { type: 'Point', coordinates: parts[0][0] }
       : parts.length === 1
         ? { type: 'LineString', coordinates: parts[0] }
@@ -128,6 +114,7 @@ function clusterToFeature(cluster: RawFeature[], type: FeatureType): QuizFeature
     geometry,
     properties: {
       name: cluster[0].name,
+      kind: kind.id,
       lengthKm: Math.round(lengthKm * 100) / 100,
       anchor: [0, 0], // filled in by `anchorOf` once the geometry is assembled
       ...(tags.wikidata ? { wikidata: tags.wikidata } : {}),
@@ -136,7 +123,7 @@ function clusterToFeature(cluster: RawFeature[], type: FeatureType): QuizFeature
   };
 }
 
-/** The representative point used to decide whether a feature is in the region. */
+/** The representative point used to place a feature on the grid and hang its label. */
 function anchorOf(feature: QuizFeature): LonLat {
   const { geometry } = feature;
   if (geometry.type === 'Point') return geometry.coordinates;
@@ -147,12 +134,18 @@ function anchorOf(feature: QuizFeature): LonLat {
   return midpointOfLine(longest);
 }
 
+/**
+ * Turns raw elements of one kind into quiz features.
+ *
+ * Deliberately applies no significance filter of any sort: the builder is what
+ * decides what is worth learning now, and a floor here would make the user's
+ * own example — hand-picking a 2 km valley they know — impossible.
+ */
 export function normalize(
-  elements: OverpassElement[],
-  type: FeatureType,
-  boundary: Boundary,
+  elements: RawElement[],
+  kind: FeatureKind,
 ): { features: QuizFeature[]; stats: BuildStats } {
-  const raw = toRawFeatures(elements);
+  const raw = toRawFeatures(elements, kind.id);
 
   const byName = new Map<string, RawFeature[]>();
   for (const feature of raw) {
@@ -165,28 +158,10 @@ export function normalize(
   const merged: QuizFeature[] = [];
   for (const group of byName.values()) {
     const clusters =
-      type.mergeGapKm > 0 ? clusterByProximity(group, type.mergeGapKm) : group.map((f) => [f]);
-    merged.push(...clusters.map((cluster) => clusterToFeature(cluster, type)));
+      kind.mergeGapKm > 0 ? clusterByProximity(group, kind.mergeGapKm) : group.map((f) => [f]);
+    merged.push(...clusters.map((cluster) => clusterToFeature(cluster, kind)));
   }
 
   for (const feature of merged) feature.properties.anchor = anchorOf(feature);
-  const inRegion = merged.filter((feature) => pointInBoundary(feature.properties.anchor, boundary));
-  const aboveFloor = inRegion.filter((f) => f.properties.lengthKm >= type.minLengthKm);
-  return {
-    features: aboveFloor,
-    stats: {
-      fetched: elements.length,
-      named: raw.length,
-      merged: merged.length,
-      inRegion: inRegion.length,
-      aboveFloor: aboveFloor.length,
-    },
-  };
-}
-
-export function rankTags(feature: QuizFeature): Record<string, string> {
-  const tags: Record<string, string> = {};
-  if (feature.properties.wikidata) tags.wikidata = feature.properties.wikidata;
-  if (feature.properties.ele !== undefined) tags.ele = String(feature.properties.ele);
-  return tags;
+  return { features: merged, stats: { named: raw.length, merged: merged.length } };
 }

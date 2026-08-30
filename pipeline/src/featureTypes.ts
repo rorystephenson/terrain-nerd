@@ -1,124 +1,112 @@
 /**
- * Feature-type registry: what to ask Overpass for, and how the results are
- * split into quizzable tiers.
+ * What we pull out of the raw pool, and what the builder can filter it by.
  *
- * Only `valley` is built today. `pass` and `peak` are declared to keep the
- * pipeline honest about generalising — both are `ele`-tagged nodes in OSM,
- * so they need `out center` and point geometry rather than lines.
+ * The pipeline no longer decides what is worth learning — it ships everything
+ * named and the player filters at build time. So this registry declares *kinds*
+ * and their filter controls, not tiers of importance.
  */
 
-export type RankInput = {
-  tags: Record<string, string>;
-  /** Total length of the merged feature, km. Zero for point features. */
-  lengthKm: number;
-  /** Domain importance, where the type computes one. See `importance.ts`. */
-  importance: number;
+/** A numeric property the builder can put a range slider on. */
+export type FilterSpec = {
+  key: 'lengthKm' | 'popularity';
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  /** Where the slider sits on a fresh builder. */
+  default: [number, number];
 };
 
-/** One difficulty band. Each becomes its own set of zone quizzes. */
-export type Tier = {
-  id: string;
+export type FeatureKind = {
+  id: KindId;
   label: string;
-  description: string;
-  keep: (f: RankInput) => boolean;
-  /** Keep only the top N by `rank`. Omit to keep everything `keep` allows. */
-  limit?: number;
-};
-
-export type FeatureType = {
-  id: string;
-  /** Plural label used in output filenames and the UI. */
-  label: string;
-  selectors: string[];
-  /** Overpass output mode: full geometry for lines, centre point for nodes. */
-  out: 'geom' | 'center';
   geometry: 'line' | 'point';
   /** Segments sharing a name within this many km are treated as one feature. */
   mergeGapKm: number;
-  /** Global floor — nothing below this is kept for any tier. */
-  minLengthKm: number;
-  /** Higher sorts first. */
-  rank: (f: RankInput) => number;
-  /** Set when this type needs computed importance rather than raw tags. */
-  scoresImportance?: boolean;
-  tiers: Tier[];
+  /** Set when this kind needs a computed popularity rather than a raw tag. */
+  scored: boolean;
+  filters: FilterSpec[];
 };
 
-const elevationOf = (tags: Record<string, string>) => {
-  const raw = tags.ele?.trim().replace(',', '.');
-  const value = raw ? Number.parseFloat(raw) : NaN;
-  return Number.isFinite(value) ? value : 0;
-};
+export type KindId = 'valley' | 'peak' | 'pass';
 
-export const featureTypes = {
+/**
+ * Peaks and passes filter on popularity alone.
+ *
+ * Altitude was considered and dropped: a 2,000 m peak you fly past every week
+ * matters more than a 3,500 m one you never see, so elevation is close to
+ * useless as a relevance filter. Length is genuinely meaningful for valleys.
+ */
+/**
+ * Defaults are calibrated to land near 40 questions over a valley-sized area,
+ * measured against Val Rendena. Anything looser produces hundreds of questions
+ * and an unplayable quiz — there are 744 named peaks around the Brenta alone.
+ */
+export const kinds = {
   valley: {
     id: 'valley',
-    label: 'valleys',
-    selectors: ['nwr["natural"="valley"]', 'nwr["place"="valley"]'],
-    out: 'geom',
+    label: 'Valleys',
     geometry: 'line',
     mergeGapKm: 5,
-    // Nothing below the major tier's own floor is used any more, so there is no
-    // reason to carry ~300 side gullies through the rest of the pipeline.
-    minLengthKm: 2,
-    // A wikidata entry is the strongest signal that a valley is one people name.
-    rank: (f) => (f.tags.wikidata ? 1000 : 0) + f.lengthKm,
-    tiers: [
-      {
-        id: 'major',
-        label: 'Valleys',
-        description: 'The ones pilots name in a flight report.',
-        keep: (f) => f.lengthKm >= 2 && (Boolean(f.tags.wikidata) || f.lengthKm > 8),
-      },
-    ],
-  },
-  pass: {
-    id: 'pass',
-    label: 'passes',
-    selectors: ['nwr["mountain_pass"="yes"]["name"]'],
-    out: 'center',
-    geometry: 'point',
-    mergeGapKm: 0,
-    minLengthKm: 0,
-    rank: (f) => elevationOf(f.tags),
-    tiers: [
-      {
-        id: 'major',
-        label: 'Major passes',
-        description: 'High crossings between valley systems.',
-        keep: (f) => elevationOf(f.tags) > 1500,
-      },
-      { id: 'minor', label: 'All passes', description: 'Every named pass.', keep: () => true },
+    scored: false,
+    filters: [
+      { key: 'lengthKm', label: 'Length', unit: 'km', min: 0, max: 40, step: 0.5, default: [5, 40] },
     ],
   },
   peak: {
     id: 'peak',
-    label: 'peaks',
-    selectors: ['nwr["natural"="peak"]["name"]'],
-    out: 'center',
+    label: 'Mountains',
     geometry: 'point',
     mergeGapKm: 0,
-    minLengthKm: 0,
-    scoresImportance: true,
-    rank: (f) => f.importance,
-    tiers: [
-      {
-        id: 'important',
-        label: 'Peaks',
-        description: 'Landmarks you navigate by: dominant, well known, and near where people fly.',
-        keep: (f) => elevationOf(f.tags) > 0,
-        limit: 120,
-      },
+    scored: true,
+    filters: [
+      { key: 'popularity', label: 'Popularity', unit: '', min: 0, max: 100, step: 1, default: [95, 100] },
     ],
   },
-} satisfies Record<string, FeatureType>;
+  pass: {
+    id: 'pass',
+    label: 'Passes',
+    geometry: 'point',
+    mergeGapKm: 0,
+    scored: true,
+    filters: [
+      { key: 'popularity', label: 'Popularity', unit: '', min: 0, max: 100, step: 1, default: [95, 100] },
+    ],
+  },
+} satisfies Record<KindId, FeatureKind>;
 
-export type FeatureTypeId = keyof typeof featureTypes;
+export const kindList = Object.values(kinds) as FeatureKind[];
 
-export function getFeatureType(id: string): FeatureType {
-  const type = (featureTypes as Record<string, FeatureType>)[id];
-  if (!type) {
-    throw new Error(`Unknown feature type "${id}". Known: ${Object.keys(featureTypes).join(', ')}`);
-  }
-  return type;
+/** Settlement classes, most significant first. The builder shows `rank <= level`. */
+export const PLACE_RANKS = ['city', 'town', 'village', 'hamlet'] as const;
+export type PlaceRank = (typeof PLACE_RANKS)[number];
+
+/**
+ * Which kind, if any, a raw OSM element belongs to.
+ *
+ * One raw cell file holds every layer at once, so this is the only thing that
+ * decides what an element becomes. Order matters: a saddle tagged as both a
+ * pass and a peak is a pass.
+ */
+export function classify(tags: Record<string, string> | undefined): KindId | null {
+  if (!tags) return null;
+  if (tags.natural === 'valley' || tags.place === 'valley') return 'valley';
+  if (tags.mountain_pass === 'yes') return 'pass';
+  if (tags.natural === 'peak') return 'peak';
+  return null;
 }
+
+export const placeRankOf = (tags: Record<string, string> | undefined): number => {
+  const at = PLACE_RANKS.indexOf(tags?.place as PlaceRank);
+  return at === -1 ? 0 : at + 1;
+};
+
+export const isFlyingSite = (tags: Record<string, string> | undefined): boolean =>
+  tags?.sport === 'free_flying';
+
+export const getKind = (id: string): FeatureKind => {
+  const kind = (kinds as Record<string, FeatureKind>)[id];
+  if (!kind) throw new Error(`Unknown kind "${id}". Known: ${Object.keys(kinds).join(', ')}`);
+  return kind;
+};

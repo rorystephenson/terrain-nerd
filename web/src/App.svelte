@@ -1,10 +1,22 @@
 <script lang="ts">
+  import Builder from './lib/Builder.svelte';
   import MapView from './lib/MapView.svelte';
   import Minimap from './lib/Minimap.svelte';
   import Prompt from './lib/Prompt.svelte';
+  import QuizList from './lib/QuizList.svelte';
   import Results from './lib/Results.svelte';
-  import ZonePicker from './lib/ZonePicker.svelte';
+  import { loadByIds, loadContext, loadIndex, loadPlaces } from './lib/chunks.ts';
+  import { padBox } from './lib/builder.ts';
+  import { levelFor, PLACE_PAD } from './lib/places.ts';
   import { gradeColor } from './lib/mapStyle.ts';
+  import {
+    deleteQuiz as removeQuiz,
+    loadBest,
+    loadQuizzes,
+    recordBest,
+    saveQuiz,
+    saveQuizzes,
+  } from './lib/storage.ts';
   import {
     attempt,
     createQuiz,
@@ -17,40 +29,42 @@
   } from './lib/quiz.ts';
   import type {
     ContextCollection,
-    FeatureFile,
-    Group,
     MapLabel,
+    PlaceFeature,
+    PoolIndex,
     QuizFeature,
-    QuizManifest,
-    Tier,
+    QuizSpec,
     ViewState,
-    Zone,
   } from './lib/types.ts';
 
   /** How long each kind of feedback stays on screen. */
   const FEEDBACK_MS = { correct: 550, miss: 1200 };
-  const BEST_KEY = 'terrain-nerd:best';
 
   type Feedback =
     | { kind: 'miss'; missedId: string | null; name: string; triesLeft: number }
     | { kind: 'correct'; name: string };
 
-  let manifest = $state<QuizManifest | null>(null);
-  let context = $state<ContextCollection | null>(null);
-  let loadError = $state<string | null>(null);
+  type Screen =
+    | { at: 'list' }
+    | { at: 'build'; editing: QuizSpec | null }
+    | { at: 'play'; spec: QuizSpec };
 
-  let selection = $state<{ group: Group; tier: Tier; zone: Zone } | null>(null);
-  let features = $state<QuizFeature[]>([]);
+  let index = $state.raw<PoolIndex | null>(null);
+  let loadError = $state<string | null>(null);
+  let screen = $state<Screen>({ at: 'list' });
+
+  let quizzes = $state<QuizSpec[]>([]);
+  let best = $state<Record<string, number>>({});
+
+  let features = $state.raw<QuizFeature[]>([]);
+  let context = $state.raw<ContextCollection>({ type: 'FeatureCollection', features: [] });
+  let places = $state.raw<PlaceFeature[]>([]);
   let quiz = $state<QuizState | null>(null);
   let feedback = $state<Feedback | null>(null);
   let locked = $state(false);
   let collapsed = $state(false);
   let viewState = $state<ViewState>({ view: [0, 0, 0, 0], covers: true });
-  let best = $state<Record<string, number>>(readBest());
   let timers: ReturnType<typeof setTimeout>[] = [];
-
-  /** Data files already fetched, keyed by filename. */
-  const loaded = new Map<string, QuizFeature[]>();
 
   const clearTimers = () => {
     for (const timer of timers) clearTimeout(timer);
@@ -58,41 +72,73 @@
   };
   const later = (fn: () => void, ms: number) => timers.push(setTimeout(fn, ms));
 
-  function readBest(): Record<string, number> {
-    try {
-      return JSON.parse(localStorage.getItem(BEST_KEY) ?? '{}') as Record<string, number>;
-    } catch {
-      return {}; // private browsing, blocked storage — scores just don't persist
-    }
-  }
-
-  function recordBest(zoneId: string, pct: number) {
-    if (best[zoneId] !== undefined && best[zoneId] >= pct) return;
-    best = { ...best, [zoneId]: pct };
-    try {
-      localStorage.setItem(BEST_KEY, JSON.stringify(best));
-    } catch {
-      // Not worth interrupting the game over.
-    }
-  }
-
   $effect(() => {
-    Promise.all([
-      fetch('data/quizzes-trentino.json').then((r) => r.json() as Promise<QuizManifest>),
-      fetch('data/context-trentino.geojson').then((r) => r.json() as Promise<ContextCollection>),
-    ])
-      .then(([m, c]) => { manifest = m; context = c; })
+    quizzes = loadQuizzes();
+    best = loadBest();
+    loadIndex()
+      .then((loaded) => (index = loaded))
       .catch((error: unknown) => {
         loadError = error instanceof Error ? error.message : String(error);
       });
     return clearTimers;
   });
 
-  const byId = $derived(new Map(features.map((f) => [f.id, f])));
+  // Loading a quiz's features is driven by the screen, so replaying or coming
+  // back from the builder always refetches exactly what this quiz needs.
+  $effect(() => {
+    const current = screen;
+    if (current.at !== 'play' || !index) return;
+    const pool = index;
+    const spec = current.spec;
+    let cancelled = false;
+
+    Promise.all([
+      loadByIds(pool, spec.bbox, spec.featureIds),
+      loadContext(pool, spec.bbox),
+    ])
+      .then(([loaded, furniture]) => {
+        if (cancelled) return;
+        features = loaded;
+        context = furniture;
+        quiz = createQuiz(loaded);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) loadError = error instanceof Error ? error.message : String(error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  /**
+   * Place names while playing, on the same rule the builder uses.
+   *
+   * They follow the map rather than a setting saved with the quiz: the player
+   * zooms in to hunt for a peak, and the names that help at that scale are not
+   * the ones that helped when the whole area was in view. They are also the only
+   * names the map is allowed to show — the features being quizzed never are —
+   * so switching them off just left you unable to find your way around.
+   */
+  $effect(() => {
+    if (screen.at !== 'play' || !index) return;
+    const pool = index;
+    const box = viewState.view;
+    if (box[2] - box[0] <= 0) return; // before the map has reported a view
+
+    let cancelled = false;
+    loadPlaces(pool, padBox(box, PLACE_PAD), levelFor(box)).then((named) => {
+      if (!cancelled) places = named;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   const nameById = $derived(new Map(features.map((f) => [f.id, f.properties.name])));
-  const zoneFeatures = $derived(
-    selection ? selection.zone.featureIds.flatMap((id) => byId.get(id) ?? []) : [],
-  );
+  /** Stable while the features are unchanged, so the map is not re-fed on every click. */
+  const collection = $derived({ type: 'FeatureCollection' as const, features });
+  const activeIds = $derived(features.map((f) => f.id));
 
   const question = $derived(quiz ? currentQuestion(quiz) : null);
   const finished = $derived(quiz ? isFinished(quiz) : false);
@@ -140,41 +186,52 @@
   });
 
   $effect(() => {
-    if (finished && selection && quiz) recordBest(selection.zone.id, score(quiz).pct);
+    if (finished && screen.at === 'play' && quiz) {
+      best = recordBest(best, screen.spec.id, score(quiz).pct);
+    }
   });
 
-  async function play(group: Group, tier: Tier, zone: Zone) {
-    clearTimers();
-    feedback = null;
-    locked = false;
-    collapsed = false;
-
-    let data = loaded.get(group.data);
-    if (!data) {
-      try {
-        const file = (await fetch(`data/${group.data}`).then((r) => r.json())) as FeatureFile;
-        data = file.features;
-        loaded.set(group.data, data);
-      } catch (error) {
-        loadError = error instanceof Error ? error.message : String(error);
-        return;
-      }
-    }
-    features = data;
-    selection = { group, tier, zone };
-    const lookup = new Map(data.map((f) => [f.id, f]));
-    quiz = createQuiz(zone.featureIds.flatMap((id) => lookup.get(id) ?? []));
-  }
-
-  const replay = () => selection && play(selection.group, selection.tier, selection.zone);
-
-  function toMenu() {
+  function play(spec: QuizSpec) {
     clearTimers();
     feedback = null;
     locked = false;
     collapsed = false;
     quiz = null;
-    selection = null;
+    features = [];
+    screen = { at: 'play', spec };
+  }
+
+  function replay() {
+    if (screen.at !== 'play') return;
+    clearTimers();
+    feedback = null;
+    locked = false;
+    collapsed = false;
+    quiz = createQuiz(features);
+  }
+
+  function toList() {
+    clearTimers();
+    feedback = null;
+    locked = false;
+    collapsed = false;
+    quiz = null;
+    screen = { at: 'list' };
+  }
+
+  function onSaved(spec: QuizSpec) {
+    quizzes = saveQuiz(spec);
+    play(spec);
+  }
+
+  function onDelete(spec: QuizSpec) {
+    quizzes = removeQuiz(spec.id);
+  }
+
+  // Scores are untouched by an import: the file never carried any.
+  function onImport(imported: QuizSpec[]) {
+    quizzes = imported;
+    saveQuizzes(imported);
   }
 
   function pick(clickedId: string | null) {
@@ -187,7 +244,10 @@
     if (outcome.kind === 'correct' || outcome.kind === 'found') {
       feedback = { kind: 'correct', name: '' };
       locked = true;
-      later(() => { feedback = null; locked = false; }, FEEDBACK_MS.correct);
+      later(() => {
+        feedback = null;
+        locked = false;
+      }, FEEDBACK_MS.correct);
       return;
     }
 
@@ -201,7 +261,9 @@
       triesLeft: outcome.kind === 'retry' ? outcome.triesLeft : 0,
     };
     // Clicks stay live: during a reveal the player still has to go and find it.
-    later(() => { feedback = null; }, FEEDBACK_MS.miss);
+    later(() => {
+      feedback = null;
+    }, FEEDBACK_MS.miss);
   }
 </script>
 
@@ -209,57 +271,80 @@
   {#if loadError}
     <div class="centred">
       <h1>Terrain Nerd</h1>
-      <p class="error">Could not load the quiz data: {loadError}</p>
-      <p class="hint">Run <code>npm run build:data</code> from the repo root, then reload.</p>
+      <p class="error">Could not load the feature pool: {loadError}</p>
+      <p class="hint">
+        Run <code>npm run extract:data</code> then <code>npm run build:data</code> from the
+        repo root, and reload.
+      </p>
     </div>
-  {:else if !manifest || !context}
+  {:else if !index}
     <div class="centred"><p class="hint">Loading terrain…</p></div>
-  {:else if selection && quiz}
-    <MapView
-      collection={{ type: 'FeatureCollection', features }}
-      {context}
-      activeIds={zoneFeatures.map((f) => f.id)}
-      bbox={selection.zone.bbox}
-      {graded}
-      {missId}
-      {revealId}
-      {labels}
-      enabled={!locked && !finished}
-      onpick={pick}
-      onview={(v) => (viewState = v)}
-    />
-    {#if !viewState.covers}
-      <Minimap bbox={selection.zone.bbox} view={viewState.view} features={zoneFeatures} />
-    {/if}
-    <Prompt
-      {question}
-      {feedback}
-      revealing={Boolean(revealId)}
-      triesLeft={remaining}
-      zoneLabel={selection.zone.label}
-      index={quiz.index}
-      total={quiz.questions.length}
-      correct={tally.correct}
-      onquit={toMenu}
-    />
-    {#if finished}
-      <Results
-        answers={quiz.answers}
-        zoneLabel={selection.zone.label}
-        previousBest={best[selection.zone.id]}
-        correct={tally.correct}
-        solved={tally.solved}
-        total={tally.total}
-        pct={tally.pct}
-        {collapsed}
-        ontoggle={() => (collapsed = !collapsed)}
-        onreplay={replay}
-        onmenu={toMenu}
-        nameOf={(id) => nameById.get(id) ?? 'empty ground'}
+  {:else if screen.at === 'build'}
+    <!-- Keyed so editing a different quiz starts from that quiz's own state. -->
+    {#key screen.editing?.id ?? 'new'}
+      <Builder {index} editing={screen.editing} onsave={onSaved} oncancel={toList} />
+    {/key}
+  {:else if screen.at === 'play'}
+    {#if quiz}
+      <MapView
+        {collection}
+        context={context}
+        mode="play"
+        {activeIds}
+        bbox={screen.spec.bbox}
+        {graded}
+        {missId}
+        {revealId}
+        {labels}
+        {places}
+        enabled={!locked && !finished}
+        onpick={pick}
+        onview={(v) => (viewState = v)}
       />
+      {#if !viewState.covers}
+        <Minimap bbox={screen.spec.bbox} view={viewState.view} {features} />
+      {/if}
+      <Prompt
+        {question}
+        {feedback}
+        revealing={Boolean(revealId)}
+        triesLeft={remaining}
+        zoneLabel={screen.spec.name}
+        index={quiz.index}
+        total={quiz.questions.length}
+        correct={tally.correct}
+        onquit={toList}
+      />
+      {#if finished}
+        <Results
+          answers={quiz.answers}
+          zoneLabel={screen.spec.name}
+          previousBest={best[screen.spec.id]}
+          correct={tally.correct}
+          solved={tally.solved}
+          total={tally.total}
+          pct={tally.pct}
+          {collapsed}
+          ontoggle={() => (collapsed = !collapsed)}
+          onreplay={replay}
+          onmenu={toList}
+          nameOf={(id) => nameById.get(id) ?? 'empty ground'}
+        />
+      {/if}
+    {:else}
+      <div class="centred"><p class="hint">Loading the quiz…</p></div>
     {/if}
   {:else}
-    <ZonePicker {manifest} {best} onpick={play} />
+    <QuizList
+      {index}
+      {quizzes}
+      {best}
+      onbuild={() => (screen = { at: 'build', editing: null })}
+      onplay={play}
+      onedit={(spec) => (screen = { at: 'build', editing: spec })}
+      ondelete={onDelete}
+      onimport={onImport}
+    />
   {/if}
 </main>
 
@@ -281,7 +366,7 @@
     padding: 1.5rem;
   }
   h1 { margin: 0; font-size: clamp(2rem, 7vw, 3rem); letter-spacing: -0.02em; }
-  .hint { margin: 0.5rem 0 0; max-width: 24rem; color: var(--muted); line-height: 1.5; }
+  .hint { margin: 0.5rem 0 0; max-width: 28rem; color: var(--muted); line-height: 1.5; }
   .error { color: var(--wrong); max-width: 30rem; }
   code { background: rgba(0, 0, 0, 0.07); padding: 0.1em 0.35em; border-radius: 4px; }
 </style>

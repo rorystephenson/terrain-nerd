@@ -4,12 +4,16 @@ import type {
   StyleSpecification,
 } from 'maplibre-gl';
 
+import { DEM_MAXZOOM, ELEVATION_STOPS, TERRARIUM } from './terrain.ts';
+
 /** A feature nobody has answered yet. */
 export const NEUTRAL = '#3f4a5a';
 /** A valley clicked by mistake — "not that one". */
 export const MISS = '#e0921a';
 /** The answer being pointed out. */
 export const REVEAL = '#d64545';
+/** A feature that will be in the quiz being built. */
+export const PICKED = '#1f7a8c';
 
 /**
  * How an answered feature is coloured, from found-first-try to had-to-be-shown.
@@ -45,14 +49,16 @@ export function gradeColor(grade: number): string {
   return `#${mix(lowHex, upper[1], 1)}${mix(lowHex, upper[1], 3)}${mix(lowHex, upper[1], 5)}`;
 }
 
+export type MapMode = 'play' | 'build';
+
 /**
- * Feature colour, resolved from feature-state.
+ * Feature colour while playing, resolved from feature-state.
  *
  * `flash` and `miss` are transient feedback and win over everything; `answered`
  * gates the grade ramp so an untouched feature is never mistaken for a perfect
  * score (feature-state has no null test, so the boolean carries that).
  */
-const colorExpression: ExpressionSpecification = [
+const playColor: ExpressionSpecification = [
   'case',
   ['boolean', ['feature-state', 'flash'], false],
   REVEAL,
@@ -66,6 +72,25 @@ const colorExpression: ExpressionSpecification = [
     ...GRADE_STOPS.flat(),
   ],
   NEUTRAL,
+] as ExpressionSpecification;
+
+/** In the builder, colour says only one thing: is this in the quiz or not. */
+const buildColor: ExpressionSpecification = [
+  'case',
+  ['boolean', ['feature-state', 'included'], false],
+  PICKED,
+  NEUTRAL,
+] as ExpressionSpecification;
+
+/**
+ * Excluded features stay visible but recede, so you can still see what you are
+ * choosing *against* — and can click one to pull it back in.
+ */
+const buildOpacity: ExpressionSpecification = [
+  'case',
+  ['boolean', ['feature-state', 'included'], false],
+  1,
+  0.28,
 ] as ExpressionSpecification;
 
 /**
@@ -84,56 +109,143 @@ export const LAYER_GEOMETRY: Record<string, FilterSpecification> = {
 /**
  * The whole basemap, built inline.
  *
- * Deliberately contains no symbol layers: standard topo tiles print valley and
- * peak names straight into the raster, which would hand the player every
- * answer. Shaded relief plus unlabeled water gives enough to navigate by
- * without giving the game away — and needs no API key.
+ * Standard topo tiles print valley and peak names straight into the raster,
+ * which would hand the player every answer, so this is assembled from raw
+ * elevation instead: a hypsometric tint and shaded relief, both computed in the
+ * browser from keyless DEM tiles.
+ *
+ * Nothing here draws text: the style has no symbol layers at all, so it needs
+ * no glyph endpoint and therefore no API key, and no name can reach the map
+ * except through the app's own HTML markers.
  */
 export function buildStyle(
-  water: GeoJSON.FeatureCollection,
+  context: GeoJSON.FeatureCollection,
   features: GeoJSON.FeatureCollection,
+  mode: MapMode = 'play',
 ): StyleSpecification {
+  const color = mode === 'build' ? buildColor : playColor;
+  const opacity = mode === 'build' ? buildOpacity : 1;
+
   return {
     version: 8,
     sources: {
       terrain: {
         type: 'raster-dem',
-        // Mapzen terrain on AWS Open Data: raw elevation, keyless.
-        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        tiles: [TERRARIUM],
         encoding: 'terrarium',
         tileSize: 256,
-        maxzoom: 13,
+        maxzoom: DEM_MAXZOOM,
         attribution: 'Terrain: Mapzen / AWS Open Data',
       },
-      water: { type: 'geojson', data: water },
+      context: { type: 'geojson', data: context },
       features: { type: 'geojson', data: features, promoteId: 'idx' },
     },
     layers: [
-      { id: 'bg', type: 'background', paint: { 'background-color': '#eceee8' } },
+      { id: 'bg', type: 'background', paint: { 'background-color': '#e8eae4' } },
+      {
+        id: 'relief',
+        type: 'color-relief',
+        source: 'terrain',
+        paint: {
+          'color-relief-opacity': 1,
+          'color-relief-color': [
+            'interpolate',
+            ['linear'],
+            ['elevation'],
+            ...ELEVATION_STOPS.flat(),
+          ] as ExpressionSpecification,
+        },
+      },
+      {
+        // Under the hillshade on purpose: ice takes the same shading as the
+        // rock around it, so a glacier reads as a surface with shape rather
+        // than a flat white sticker laid over the mountain.
+        id: 'glacier',
+        type: 'fill',
+        source: 'context',
+        filter: ['==', ['get', 'kind'], 'glacier'],
+        paint: { 'fill-color': '#e4edf3', 'fill-opacity': 0.95 },
+      },
       {
         id: 'hillshade',
         type: 'hillshade',
         source: 'terrain',
         paint: {
-          'hillshade-shadow-color': '#4a5a52',
-          'hillshade-highlight-color': '#ffffff',
-          'hillshade-accent-color': '#6f8073',
-          'hillshade-exaggeration': 0.55,
+          // Contrast comes from the shadows; the highlight stays modest so lit
+          // faces keep their colour instead of blowing out to white.
+          'hillshade-method': 'igor',
+          'hillshade-exaggeration': 1,
+          'hillshade-shadow-color': 'rgba(14,10,6,1)',
+          'hillshade-highlight-color': 'rgba(255,255,255,0.32)',
+          'hillshade-accent-color': 'rgba(0,0,0,0)',
+        },
+      },
+      {
+        /*
+         * A second, shadow-only pass, purely to deepen the dark end.
+         *
+         * Both of the obvious dials are already at their stops: MapLibre caps
+         * `hillshade-exaggeration` at 1, and the shadow alpha is at 1 with a
+         * near-black colour. Stacking a second hillshade is the only way left
+         * to get darker, and it is the *right* way — it deepens shadow without
+         * touching the highlight, so the shading gets contrastier rather than
+         * the whole map getting muddier. Measured against the reference render,
+         * this brings the 5th-percentile luminance from 48 to 36 against its 35.
+         */
+        id: 'hillshade-deepen',
+        type: 'hillshade',
+        source: 'terrain',
+        paint: {
+          'hillshade-method': 'igor',
+          'hillshade-exaggeration': 1,
+          'hillshade-shadow-color': 'rgba(10,7,4,0.48)',
+          'hillshade-highlight-color': 'rgba(0,0,0,0)',
+          'hillshade-accent-color': 'rgba(0,0,0,0)',
         },
       },
       {
         id: 'rivers',
         type: 'line',
-        source: 'water',
+        source: 'context',
         filter: ['==', ['get', 'kind'], 'river'],
-        paint: { 'line-color': '#7fa8c9', 'line-width': 1, 'line-opacity': 0.55 },
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#93c0da',
+          'line-opacity': 0.75,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.6, 14, 2.4],
+        },
       },
       {
+        // Above the rivers, because OSM maps a river's course straight through
+        // the lake it flows into. Drawn the other way round, a blue line runs
+        // down the middle of Garda.
         id: 'lakes',
         type: 'fill',
-        source: 'water',
+        source: 'context',
         filter: ['==', ['get', 'kind'], 'lake'],
-        paint: { 'fill-color': '#8fb8d8', 'fill-opacity': 0.75 },
+        paint: { 'fill-color': '#a9cee4', 'fill-opacity': 0.9 },
+      },
+      {
+        id: 'roads-casing',
+        type: 'line',
+        source: 'context',
+        filter: ['==', ['get', 'kind'], 'road'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': 'rgba(60,55,50,0.45)',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.6, 14, 5.5],
+        },
+      },
+      {
+        id: 'roads',
+        type: 'line',
+        source: 'context',
+        filter: ['==', ['get', 'kind'], 'road'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#ffffff',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 14, 3.6],
+        },
       },
       {
         id: 'features-casing',
@@ -143,7 +255,7 @@ export function buildStyle(
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': '#ffffff',
-          'line-opacity': 0.65,
+          'line-opacity': mode === 'build' ? (buildOpacity as ExpressionSpecification) : 0.65,
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 7, 12, 13],
         },
       },
@@ -155,7 +267,8 @@ export function buildStyle(
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 4, 12, 8],
-          'line-color': colorExpression,
+          'line-color': color,
+          'line-opacity': opacity,
         },
       },
       {
@@ -165,10 +278,11 @@ export function buildStyle(
         filter: LAYER_GEOMETRY['features-point'],
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 5, 12, 9],
-          'circle-color': colorExpression,
+          'circle-color': color,
+          'circle-opacity': opacity,
           'circle-stroke-width': 2,
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-opacity': 0.9,
+          'circle-stroke-opacity': mode === 'build' ? (buildOpacity as ExpressionSpecification) : 0.9,
         },
       },
     ],

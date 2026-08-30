@@ -3,8 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["pipeline", "web"],
+  "workspaces": [
+    "pipeline",
+    "web"
+  ],
   "scripts": {
+    "extract:data": "npm run extract:data -w pipeline --",
     "build:data": "npm run build:data -w pipeline --",
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",

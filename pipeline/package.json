@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build:data": "node src/build.ts"
+    "extract:data": "node src/extract.ts",
+    "build:data": "node src/process.ts",
+    "typecheck": "tsc --noEmit"
   }
 }

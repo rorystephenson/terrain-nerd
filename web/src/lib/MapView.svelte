@@ -1,43 +1,81 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import maplibregl from 'maplibre-gl';
-  import { buildStyle, LAYER_GEOMETRY, PICK_LAYERS } from './mapStyle.ts';
-  import type { ContextCollection, FeatureFile, MapLabel, ViewState } from './types.ts';
+  import { layoutLabels } from './labels.ts';
+  import { buildStyle, LAYER_GEOMETRY, PICK_LAYERS, type MapMode } from './mapStyle.ts';
+  import { isIncluded, isLocked } from './builder.ts';
+  import type {
+    ContextCollection,
+    FeatureFile,
+    Inclusion,
+    MapLabel,
+    PlaceFeature,
+    ViewState,
+  } from './types.ts';
 
   type Props = {
     collection: FeatureFile;
     context: ContextCollection;
-    /** Feature ids drawn for the current round. */
-    activeIds: string[];
-    /** The zone's extent, framed on entry. */
+    mode?: MapMode;
+    /** Feature ids drawn for the current round. Play mode only. */
+    activeIds?: string[];
+    /** The area's extent. Framed and leashed in play, only framed in build. */
     bbox: [number, number, number, number];
+    /** How far the player may roam in build mode — the extent of the data. */
+    coverage?: [number, number, number, number];
     /** Answered features: id -> grade (0 found first try … 1 had to be shown). */
-    graded: Record<string, number>;
+    graded?: Record<string, number>;
     /** A feature clicked by mistake, shown amber while its label is up. */
-    missId: string | null;
+    missId?: string | null;
     /** The answer being pointed out: flashes and pulses until it is clicked. */
-    revealId: string | null;
-    labels: MapLabel[];
-    enabled: boolean;
+    revealId?: string | null;
+    labels?: MapLabel[];
+    /** Build mode: what the current filters and locks make of each feature. */
+    shade?: Record<string, Inclusion>;
+    /** Settlement names drawn as an orientation aid. */
+    places?: PlaceFeature[];
+    enabled?: boolean;
     onpick: (id: string | null) => void;
-    onview: (view: ViewState) => void;
+    onview?: (view: ViewState) => void;
   };
 
   let {
     collection,
     context,
+    mode = 'play',
     activeIds,
     bbox,
-    graded,
-    missId,
-    revealId,
-    labels,
-    enabled,
+    coverage,
+    graded = {},
+    missId = null,
+    revealId = null,
+    labels = [],
+    shade = {},
+    places = [],
+    enabled = true,
     onpick,
     onview,
   }: Props = $props();
 
   /** How fast the revealed feature blinks. */
   const FLASH_MS = 420;
+  /** How far beyond the framed view the player may pan, as a fraction of it. */
+  const PAN_SLACK = 0.15;
+  /** Below this, naming every candidate would be unreadable anyway. */
+  const NAME_FROM_ZOOM = 9.5;
+  const MAX_FEATURE_LABELS = 45;
+  /**
+   * A ceiling, not a quota. Which names appear should follow zoom and available
+   * space; a tight cap would make it follow the viewport instead, so that
+   * panning a busier area into view silently evicted labels elsewhere.
+   */
+  const MAX_PLACE_LABELS = 140;
+  /**
+   * How far off screen labels still compete, in pixels. Comfortably wider than
+   * the longest place name, so a label sliding into view cannot displace one
+   * already drawn.
+   */
+  const LABEL_PAD = 320;
 
   /**
    * MapLibre feature-state needs a stable id it can index on, so every feature
@@ -52,14 +90,14 @@
     })),
   });
   const idxOf = $derived(new Map(collection.features.map((feature, idx) => [feature.id, idx])));
-  const anchorOf = $derived(
-    new Map(collection.features.map((feature) => [feature.id, feature.properties.anchor])),
-  );
-  const bboxOf = $derived(new Map(collection.features.map((feature) => [feature.id, feature.bbox])));
+  const byId = $derived(new Map(collection.features.map((feature) => [feature.id, feature])));
 
   let container: HTMLDivElement;
   let map: maplibregl.Map | undefined = $state();
   let ready = $state(false);
+  let hoveredId = $state<string | null>(null);
+  /** Bumped on every move, so label layout recomputes against the new screen. */
+  let viewTick = $state(0);
 
   const pad = (box: [number, number, number, number], lon: number, lat: number) =>
     [
@@ -67,27 +105,35 @@
       [box[2] + lon, box[3] + lat],
     ] as [[number, number], [number, number]];
 
-  /** How far beyond the framed view the player may pan, as a fraction of it. */
-  const PAN_SLACK = 0.15;
-
   /**
-   * Frames the zone and locks the view to it.
+   * Frames the area and locks the view to it.
    *
-   * The leash is derived from the *fitted viewport*, not from the zone's own
+   * The leash is derived from the *fitted viewport*, not from the area's own
    * bbox. That matters: bounds narrower than the window make MapLibre zoom in
-   * to obey them, so a leash measured off the bbox would either crop the zone
+   * to obey them, so a leash measured off the bbox would either crop the area
    * or, padded enough to be safe, let the player wander half the province.
    * Pinning `minZoom` to the framing zoom closes the same hole from the other
    * side — you cannot zoom out past the area being quizzed.
    */
   function frame(instance: maplibregl.Map) {
-    // The previous zone's limits would constrain this fit, so clear them first.
+    // The previous area's limits would constrain this fit, so clear them first.
     instance.setMaxBounds(null);
     instance.setMinZoom(0);
     instance.fitBounds(pad(bbox, 0.02, 0.02), {
       padding: { top: 110, bottom: 40, left: 40, right: 40 },
       duration: 0,
     });
+
+    // Choosing an area means going wherever you like inside the coverage.
+    if (mode === 'build') {
+      if (coverage) {
+        instance.setMaxBounds([
+          [coverage[0], coverage[1]],
+          [coverage[2], coverage[3]],
+        ]);
+      }
+      return;
+    }
 
     instance.setMinZoom(instance.getZoom());
     const framed = instance.getBounds();
@@ -127,24 +173,39 @@
       view.getEast(),
       view.getNorth(),
     ];
-    onview({
+    onview?.({
       view: box,
-      covers:
-        box[0] <= bbox[0] && box[1] <= bbox[1] && box[2] >= bbox[2] && box[3] >= bbox[3],
+      covers: box[0] <= bbox[0] && box[1] <= bbox[1] && box[2] >= bbox[2] && box[3] >= bbox[3],
     });
   }
 
+  /**
+   * Builds the map exactly once.
+   *
+   * Every read here is untracked on purpose. `buildStyle` and the initial
+   * `bounds` read `indexed`, `context` and `bbox`, and left tracked they make
+   * the map itself depend on its own data — so loading a chunk, or toggling a
+   * feature type, would tear the whole map down and construct a new one, which
+   * reads on screen as the map zooming out and back in. The source is kept
+   * current by the `setData` effects below instead.
+   */
   $effect(() => {
-    const instance = new maplibregl.Map({
-      container,
+    const initial = untrack(() => ({
       bounds: pad(bbox, 0.02, 0.02),
-      maxZoom: 14,
-      dragRotate: false,
-      attributionControl: false,
       style: buildStyle(
         context as GeoJSON.FeatureCollection,
         indexed as GeoJSON.FeatureCollection,
+        mode,
       ),
+    }));
+
+    const instance = new maplibregl.Map({
+      container,
+      bounds: initial.bounds,
+      maxZoom: 14,
+      dragRotate: false,
+      attributionControl: false,
+      style: initial.style,
     });
 
     instance.addControl(
@@ -161,9 +222,18 @@
       ready = true;
       report(instance);
     });
-    instance.on('move', () => report(instance));
-    // A resized window changes what "fits", so the leash has to be recut.
-    instance.on('resize', () => frame(instance));
+    instance.on('move', () => {
+      report(instance);
+      viewTick++;
+    });
+    // A resized window changes what "fits", so the play leash has to be recut.
+    // The builder deliberately does not re-frame: its camera belongs to the
+    // user, and re-fitting would both move it under them and, because a fit
+    // pads outwards, ratchet the framed area wider on every resize.
+    instance.on('resize', () => {
+      if (mode === 'play') frame(instance);
+      viewTick++;
+    });
 
     return () => {
       ready = false;
@@ -171,30 +241,54 @@
     };
   });
 
-  // Only the features in play this round are drawn — the player chooses between
-  // visible candidates, Seterra-style, rather than hunting blank terrain.
+  // The builder swaps in a whole new area as you pan, so the source is updated
+  // in place rather than rebuilding the map.
   $effect(() => {
     if (!ready || !map) return;
-    const active = activeIds.map((id) => idxOf.get(id)).filter((idx) => idx !== undefined);
-    const inRound = ['in', ['get', 'idx'], ['literal', active]] as maplibregl.FilterSpecification;
+    const source = map.getSource('features') as maplibregl.GeoJSONSource | undefined;
+    source?.setData(indexed as GeoJSON.FeatureCollection);
+  });
+
+  $effect(() => {
+    if (!ready || !map) return;
+    const source = map.getSource('context') as maplibregl.GeoJSONSource | undefined;
+    source?.setData(context as GeoJSON.FeatureCollection);
+  });
+
+  // Play draws only the round's features — the player chooses between visible
+  // candidates, Seterra-style, rather than hunting blank terrain. The builder
+  // draws everything, because what you are excluding is part of the decision.
+  $effect(() => {
+    if (!ready || !map) return;
+    const round =
+      mode === 'play' && activeIds
+        ? (['in', ['get', 'idx'], ['literal', activeIds.flatMap((id) => idxOf.get(id) ?? [])]] as maplibregl.FilterSpecification)
+        : null;
+
     // Keep each layer's geometry restriction — replacing the filter outright is
     // what would let the circle layer speckle dots along every valley line.
     for (const [id, geometry] of Object.entries(LAYER_GEOMETRY)) {
-      if (map.getLayer(id)) {
-        map.setFilter(id, ['all', geometry, inRound] as unknown as maplibregl.FilterSpecification);
-      }
+      if (!map.getLayer(id)) continue;
+      map.setFilter(
+        id,
+        (round
+          ? ['all', geometry, round]
+          : geometry) as unknown as maplibregl.FilterSpecification,
+      );
     }
-  });
-
-  // Re-frame whenever the zone changes. Top padding clears the prompt bar.
-  $effect(() => {
-    if (!ready || !map) return;
-    frame(map);
   });
 
   $effect(() => {
     if (!ready || !map) return;
     for (const [id, idx] of idxOf) {
+      if (mode === 'build') {
+        const inclusion = shade[id] ?? 'auto-out';
+        map.setFeatureState(
+          { source: 'features', id: idx },
+          { included: isIncluded(inclusion), locked: isLocked(inclusion) },
+        );
+        continue;
+      }
       const grade = graded[id];
       map.setFeatureState(
         { source: 'features', id: idx },
@@ -218,32 +312,30 @@
     if (!ready || !map || !revealId) return;
     const instance = map;
     const idx = idxOf.get(revealId);
-    const anchor = anchorOf.get(revealId);
-    if (idx === undefined || !anchor) return;
+    const target = byId.get(revealId);
+    if (idx === undefined || !target) return;
 
-    const box = bboxOf.get(revealId);
-    if (box) {
-      const view = instance.getBounds();
-      const onScreen =
-        view.getWest() <= box[0] &&
-        view.getSouth() <= box[1] &&
-        view.getEast() >= box[2] &&
-        view.getNorth() >= box[3];
-      if (!onScreen) {
-        instance.fitBounds(
-          [
-            [box[0], box[1]],
-            [box[2], box[3]],
-          ],
-          {
-            padding: { top: 110, bottom: 48, left: 48, right: 48 },
-            // Never zoom further in than the player already was; they chose
-            // that scale and yanking it away is disorienting.
-            maxZoom: instance.getZoom(),
-            duration: 500,
-          },
-        );
-      }
+    const box = target.bbox;
+    const view = instance.getBounds();
+    const onScreen =
+      view.getWest() <= box[0] &&
+      view.getSouth() <= box[1] &&
+      view.getEast() >= box[2] &&
+      view.getNorth() >= box[3];
+    if (!onScreen) {
+      instance.fitBounds(
+        [
+          [box[0], box[1]],
+          [box[2], box[3]],
+        ],
+        {
+          padding: { top: 110, bottom: 48, left: 48, right: 48 },
+          // Never zoom further in than the player already was; they chose that
+          // scale and yanking it away is disorienting.
+          maxZoom: instance.getZoom(),
+          duration: 500,
+        },
+      );
     }
 
     let on = true;
@@ -256,7 +348,9 @@
 
     const element = document.createElement('div');
     element.className = 'map-pulse';
-    const marker = new maplibregl.Marker({ element }).setLngLat(anchor).addTo(instance);
+    const marker = new maplibregl.Marker({ element })
+      .setLngLat(target.properties.anchor)
+      .addTo(instance);
 
     return () => {
       clearInterval(timer);
@@ -265,24 +359,127 @@
     };
   });
 
+  type Drawn = { key: string; text: string; at: [number, number]; className: string; color?: string };
+
   /**
-   * Labels are HTML markers rather than a symbol layer: a symbol layer would
-   * need a glyph endpoint (and therefore an API key), and keeping the style
-   * label-free is what guarantees the basemap cannot give an answer away.
+   * Everything to write on the map, already thinned so nothing overlaps.
+   *
+   * Play labels the answers as they land; the builder labels what is currently
+   * selected, because you cannot hand-pick "the 2 km valley I know" without
+   * being able to read which line it is.
+   */
+  const drawn = $derived.by((): Drawn[] => {
+    void viewTick;
+    if (!ready || !map) return [];
+    const instance = map;
+    const canvas = instance.getCanvas();
+    const size = { width: canvas.clientWidth, height: canvas.clientHeight };
+    const project = (at: [number, number]) => instance.project(at);
+
+    const out: Drawn[] = [];
+
+    if (mode === 'play') {
+      for (const label of labels) {
+        const anchor = byId.get(label.featureId)?.properties.anchor;
+        if (anchor) {
+          out.push({
+            key: `f:${label.featureId}`,
+            text: label.text,
+            at: anchor,
+            className: `map-label map-label--${label.tone}`,
+            color: label.color,
+          });
+        }
+      }
+    } else if (instance.getZoom() >= NAME_FROM_ZOOM) {
+      const candidates = collection.features
+        .filter((f) => isIncluded(shade[f.id] ?? 'auto-out') || f.id === hoveredId)
+        .map((f) => ({
+          // Hovering is a direct question about one feature, so it always wins.
+          priority: f.id === hoveredId ? 1e6 : (f.properties.popularity ?? f.properties.lengthKm),
+          text: f.properties.name,
+          item: f,
+          key: f.id,
+        }));
+      for (const placed of layoutLabels(candidates, (f) => project(f.properties.anchor), {
+        ...size,
+        pad: LABEL_PAD,
+        max: MAX_FEATURE_LABELS,
+      })) {
+        out.push({
+          key: `f:${placed.item.id}`,
+          text: placed.text,
+          at: placed.item.properties.anchor,
+          className: `map-label map-label--picked${placed.item.id === hoveredId ? ' is-hover' : ''}`,
+        });
+      }
+    }
+
+    if (places.length > 0) {
+      const candidates = places.map((place) => ({
+        priority: 100 - place.properties.rank,
+        text: place.properties.name,
+        item: place,
+        // Settlements are points, so name plus position is a sound identity.
+        key: `${place.properties.name}@${place.geometry.coordinates.join(',')}`,
+      }));
+      for (const placed of layoutLabels(
+        candidates,
+        (place) => project(place.geometry.coordinates),
+        { ...size, pad: LABEL_PAD, max: MAX_PLACE_LABELS },
+      )) {
+        out.push({
+          key: `p:${placed.text}@${placed.item.geometry.coordinates.join()}`,
+          text: placed.text,
+          at: placed.item.geometry.coordinates,
+          className: `map-place map-place--r${placed.item.properties.rank}`,
+        });
+      }
+    }
+
+    return out;
+  });
+
+  /**
+   * Place and feature names are HTML markers, never a symbol layer. The style
+   * has no symbol layers at all, so no text can reach the map except through
+   * here, where the app decides what may be shown.
    */
   $effect(() => {
     if (!ready || !map) return;
     const instance = map;
-    const markers = labels.flatMap((label) => {
-      const anchor = anchorOf.get(label.featureId);
-      if (!anchor) return [];
+    const markers = drawn.map((label) => {
       const element = document.createElement('div');
-      element.className = `map-label map-label--${label.tone}`;
+      element.className = label.className;
       element.textContent = label.text;
       if (label.color) element.style.background = label.color;
-      return [
-        new maplibregl.Marker({ element, anchor: 'bottom' }).setLngLat(anchor).addTo(instance),
-      ];
+      return new maplibregl.Marker({ element, anchor: 'bottom' })
+        .setLngLat(label.at)
+        .addTo(instance);
+    });
+    return () => {
+      for (const marker of markers) marker.remove();
+    };
+  });
+
+  /** A pin on anything the user has decided about by hand, so locks are visible. */
+  const pinned = $derived(
+    mode === 'build'
+      ? collection.features.filter((f) => isLocked(shade[f.id] ?? 'auto-out'))
+      : [],
+  );
+
+  $effect(() => {
+    if (!ready || !map) return;
+    const instance = map;
+    const markers = pinned.map((feature) => {
+      const element = document.createElement('div');
+      const inclusion = shade[feature.id];
+      element.className = `map-pin map-pin--${inclusion === 'locked-in' ? 'in' : 'out'}`;
+      element.title = inclusion === 'locked-in' ? 'Pinned in' : 'Pinned out';
+      return new maplibregl.Marker({ element, anchor: 'center' })
+        .setLngLat(feature.properties.anchor)
+        .addTo(instance);
     });
     return () => {
       for (const marker of markers) marker.remove();
@@ -296,7 +493,9 @@
       if (enabled) onpick(pickAt(event.point));
     };
     const onMove = (event: maplibregl.MapMouseEvent) => {
-      instance.getCanvas().style.cursor = enabled && pickAt(event.point) ? 'pointer' : '';
+      const hit = enabled ? pickAt(event.point) : null;
+      instance.getCanvas().style.cursor = hit ? 'pointer' : '';
+      if (mode === 'build') hoveredId = hit;
     };
     instance.on('click', onClick);
     instance.on('mousemove', onMove);

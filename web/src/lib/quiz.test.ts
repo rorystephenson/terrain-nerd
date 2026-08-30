@@ -18,7 +18,7 @@ const feature = (id: string, name: string): QuizFeature => ({
   id,
   bbox: [0, 0, 1, 1],
   geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] },
-  properties: { name, lengthKm: 10, anchor: [0.5, 0.5] },
+  properties: { name, kind: 'valley', lengthKm: 10, anchor: [0.5, 0.5] },
 });
 
 const pool = Array.from({ length: 30 }, (_, i) => feature(`way/${i}`, `Val ${i}`));
