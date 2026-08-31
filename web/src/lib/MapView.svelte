@@ -540,6 +540,27 @@
   });
 
   /**
+   * Lights the feature under the pointer, and puts it out again when the
+   * pointer moves on.
+   *
+   * Kept apart from the effect above rather than folded into its loop: that one
+   * rewrites every feature whenever a grade or a miss changes, and a hover
+   * changes far more often than either. `setFeatureState` merges, so writing
+   * one key here leaves the answer state the other effect owns untouched.
+   *
+   * Only unanswered features are ever lit, because `pickAt` is the only source
+   * of `hoveredId` and it refuses to return a feature that is already spent.
+   */
+  $effect(() => {
+    if (!ready || !map || !hoveredId) return;
+    const instance = map;
+    const idx = idxOf.get(hoveredId);
+    if (idx === undefined) return;
+    instance.setFeatureState({ source: 'features', id: idx }, { hover: true });
+    return () => instance.setFeatureState({ source: 'features', id: idx }, { hover: false });
+  });
+
+  /**
    * Blinks the revealed feature and pulses a ring at it, panning there first if
    * it is off screen. It blinks rather than staying red because the player still
    * has to go and click it — a static highlight is something you look at, a
@@ -818,7 +839,13 @@
     const onMove = (event: maplibregl.MapMouseEvent) => {
       const hit = enabled ? pickAt(event.point) : null;
       instance.getCanvas().style.cursor = hit ? 'pointer' : '';
-      if (mode === 'build') hoveredId = hit;
+      hoveredId = hit;
+    };
+    // A pointer that leaves the map is not hovering anything. Without this the
+    // last feature it crossed stays lit, and a highlight that outlives the
+    // pointer has stopped reading as a hover and started reading as a state.
+    const onLeave = () => {
+      hoveredId = null;
     };
 
     instance.on('click', onClick);
@@ -826,12 +853,14 @@
     instance.on('touchmove', onTouchMove);
     instance.on('touchend', onTouchEnd);
     instance.on('mousemove', onMove);
+    instance.on('mouseout', onLeave);
     return () => {
       instance.off('click', onClick);
       instance.off('touchstart', onTouchStart);
       instance.off('touchmove', onTouchMove);
       instance.off('touchend', onTouchEnd);
       instance.off('mousemove', onMove);
+      instance.off('mouseout', onLeave);
     };
   });
 </script>

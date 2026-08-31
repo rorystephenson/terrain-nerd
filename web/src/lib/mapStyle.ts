@@ -24,6 +24,27 @@ import { DEM_MAXZOOM, ELEVATION_STOPS, TERRARIUM } from './terrain.ts';
  */
 export const UNANSWERED = '#6d28d9';
 
+/**
+ * The unanswered feature under the pointer.
+ *
+ * The same violet — hue held at 263 — lifted in lightness rather than washed
+ * towards white: mixing with white takes the saturation out with it, and a
+ * greyed-off violet reads as a feature going quiet, the opposite of what a
+ * hover is saying. Saturation goes the other way, 0.70 to 0.90, so the lift
+ * gains colour instead of losing it.
+ *
+ * Held against its resting colour it is a 2.1:1 step in luminance. That is well
+ * past the point of being noticed, which is what a hover is for — it is picking
+ * one line out of a screen full of them — and it still sits at 3.4:1 on its
+ * white casing, over the 3:1 a shape rather than a letterform has to hold.
+ * Lighter than this only buys distinctness by giving up the casing.
+ *
+ * Only ever seen on a feature nobody has answered: `pickAt` refuses to return
+ * anything already spent, so there is no hover to light on an answered valley,
+ * and the expression checks the grade first in any case.
+ */
+export const UNANSWERED_HOVER = '#a36ef7';
+
 /** A feature the builder is leaving out. Grey says "not part of this". */
 export const NEUTRAL = '#3f4a5a';
 /** A valley clicked by mistake — "not that one". */
@@ -106,7 +127,9 @@ export type MapMode = 'play' | 'build';
  *
  * `flash` and `miss` are transient feedback and win over everything; `answered`
  * gates the grade ramp so an untouched feature is never mistaken for a perfect
- * score (feature-state has no null test, so the boolean carries that).
+ * score (feature-state has no null test, so the boolean carries that). `hover`
+ * comes last of all: it is worth saying about a feature still to be found and
+ * nothing at all about one whose colour is already an answer.
  */
 const playColor: ExpressionSpecification = [
   'case',
@@ -121,6 +144,8 @@ const playColor: ExpressionSpecification = [
     ['to-number', ['feature-state', 'grade'], 0],
     ...GRADE_STOPS.flat(),
   ],
+  ['boolean', ['feature-state', 'hover'], false],
+  UNANSWERED_HOVER,
   UNANSWERED,
 ] as ExpressionSpecification;
 

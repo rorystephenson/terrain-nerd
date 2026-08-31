@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
+import { expression, validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 
 import {
   buildStyle,
@@ -12,6 +12,8 @@ import {
   LAYER_GEOMETRY,
   LINE_LAYERS,
   PICK_LAYERS,
+  UNANSWERED,
+  UNANSWERED_HOVER,
 } from './mapStyle.ts';
 import { gradeFor, MAX_TRIES } from './quiz.ts';
 import { ELEVATION_STOPS } from './terrain.ts';
@@ -188,6 +190,58 @@ test('feature layers are restricted by geometry', () => {
       `${id} still lets points through`,
     );
   }
+});
+
+/**
+ * What MapLibre would actually paint a feature, given its feature-state.
+ *
+ * Compiled and evaluated rather than read off the expression by index: the
+ * `case` is a flat list of test-then-value, so an assertion on its shape says
+ * nothing about which branch a state lands in — which is the whole of what
+ * these colours have to get right.
+ */
+const painted = (() => {
+  const layer = style.layers.find((l) => l.id === LINE_LAYERS[0]) as {
+    paint: Record<string, unknown>;
+  };
+  const compiled = expression.createExpression(layer.paint['line-color'], {
+    type: 'color',
+    'property-type': 'data-driven',
+    expression: { parameters: ['zoom', 'feature', 'feature-state'] },
+  } as never);
+  assert.equal(compiled.result, 'success');
+  const value = (compiled as { value: { evaluate: (...args: unknown[]) => unknown } }).value;
+  return (state: Record<string, unknown>) =>
+    String(value.evaluate({ zoom: 10 }, { type: 'LineString', properties: {} }, state));
+})();
+
+/** A hex colour as MapLibre renders it back out, for comparison. */
+const rgba = (hex: string) =>
+  `rgba(${[1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)).join(',')},1)`;
+
+test('hovering an unanswered feature lightens it, and only it', () => {
+  assert.equal(painted({}), rgba(UNANSWERED), 'untouched');
+  assert.equal(painted({ hover: true }), rgba(UNANSWERED_HOVER), 'under the pointer');
+  // An answered feature's colour is its score. A hover that overrode it would
+  // rub out the one thing the finished map is there to show.
+  assert.equal(
+    painted({ answered: true, grade: 0, hover: true }),
+    painted({ answered: true, grade: 0 }),
+    'answered stays on the ramp',
+  );
+  // Both feedback colours are being said *about* a feature, and outrank a
+  // pointer that merely happens to be resting on it.
+  assert.equal(painted({ miss: true, hover: true }), painted({ miss: true }), 'a miss holds');
+  assert.equal(painted({ flash: true, hover: true }), painted({ flash: true }), 'a reveal holds');
+});
+
+test('the hover violet is a visible step that still holds its casing', () => {
+  const [base, lit] = [UNANSWERED, UNANSWERED_HOVER].map(luminance);
+  // Lighter, as asked, and by enough to read as a change at a glance.
+  assert.ok(lit > base, 'lighter than the resting colour');
+  assert.ok((lit + 0.05) / (base + 0.05) >= 1.9, 'and not by a hair');
+  // A line on a white casing is a graphic element: 3:1 is the bar it must clear.
+  assert.ok(1.05 / (lit + 0.05) >= 3, 'still reads against the white casing');
 });
 
 test('gradeColor matches the ramp the map paints with', () => {
