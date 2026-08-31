@@ -18,8 +18,22 @@ body {
   overscroll-behavior: none;
 }
 
-/* MapLibre's controls default to a blue focus ring that clashes with the map. */
-.maplibregl-ctrl-attrib { font-size: 11px; }
+/*
+ * Map attribution: required, so it is always on screen — but it is a credit,
+ * not something anyone came here to read. Set as small and as faint as it can
+ * be and still be legible, with MapLibre's white plate dropped, so it reads as
+ * a footnote on the terrain rather than as part of the game.
+ */
+.maplibregl-ctrl.maplibregl-ctrl-attrib {
+  margin: 0;
+  padding: 0 5px 2px 0;
+  background: none;
+  font-size: 9px;
+  line-height: 1.5;
+  color: rgba(29, 35, 43, 0.62);
+}
+.maplibregl-ctrl-attrib a { color: inherit; }
+.maplibregl-ctrl-attrib a:hover { color: rgba(29, 35, 43, 0.9); }
 
 /*
  * Feature name labels. Created imperatively as MapLibre markers, so these

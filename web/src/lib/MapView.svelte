@@ -445,9 +445,17 @@
     // Before the first frame is drawn, so nothing can be shown off the leash.
     if (mode === 'play') instance.setTransformConstrain(leash(instance, untrack(() => bounds)));
 
+    // Added before the zoom buttons so it lands under them, flush in the corner:
+    // MapLibre *prepends* controls in a bottom corner, so the first one added is
+    // the one nearest the edge.
+    //
+    // `compact: false` because the collapsed form is a white pill with an info
+    // button — furniture that looks like a control you are meant to press, on a
+    // screen where pressing things is the whole game. Styled down to a line of
+    // faint text in styles.css.
     instance.addControl(
       new maplibregl.AttributionControl({
-        compact: true,
+        compact: false,
         customAttribution: '© OpenStreetMap contributors',
       }),
       'bottom-right',
