@@ -390,7 +390,10 @@
         const anchor = byId.get(label.featureId)?.properties.anchor;
         if (anchor) {
           out.push({
-            key: `f:${label.featureId}`,
+            // The tone is part of the identity: a feature going from wrong
+            // to answered is a new label that should animate in, not the old
+            // one restyled in place.
+            key: `f:${label.featureId}:${label.tone}`,
             text: label.text,
             at: anchor,
             className: `map-label map-label--${label.tone}`,
@@ -447,27 +450,58 @@
     return out;
   });
 
+  /** Labels currently on the map, by key, so they can be reconciled in place. */
+  const live = new Map<string, { marker: maplibregl.Marker; label: Drawn }>();
+
   /**
    * Place and feature names are HTML markers, never a symbol layer. The style
    * has no symbol layers at all, so no text can reach the map except through
    * here, where the app decides what may be shown.
+   *
+   * The set is reconciled by key rather than rebuilt. Every `move` bumps
+   * `viewTick` so the layout can be recut against the new screen, and tearing
+   * the markers down each time restarted `label-in` on every surviving label —
+   * which, since that animation starts at zero opacity, left the wrong-guess
+   * and reveal labels invisible for as long as the player kept panning.
    */
   $effect(() => {
-    if (!ready || !map) return;
-    const instance = map;
-    const markers = drawn.map((label) => {
-      const element = document.createElement('div');
-      element.className = label.className;
-      element.textContent = label.text;
-      // Answered names are set in their grade colour rather than plated in it.
-      if (label.color) element.style.color = label.color;
-      return new maplibregl.Marker({ element, anchor: 'bottom' })
-        .setLngLat(label.at)
-        .addTo(instance);
-    });
-    return () => {
-      for (const marker of markers) marker.remove();
-    };
+    const instance = ready ? map : undefined;
+    if (!instance) {
+      for (const { marker } of live.values()) marker.remove();
+      live.clear();
+      return;
+    }
+
+    const wanted = new Map(drawn.map((label) => [label.key, label]));
+    for (const [key, entry] of live) {
+      if (wanted.has(key)) continue;
+      entry.marker.remove();
+      live.delete(key);
+    }
+
+    for (const [key, label] of wanted) {
+      const entry = live.get(key);
+      if (!entry) {
+        const element = document.createElement('div');
+        element.className = label.className;
+        element.textContent = label.text;
+        // Answered names are set in their grade colour rather than plated in it.
+        if (label.color) element.style.color = label.color;
+        const marker = new maplibregl.Marker({ element, anchor: 'bottom' })
+          .setLngLat(label.at)
+          .addTo(instance);
+        live.set(key, { marker, label });
+        continue;
+      }
+      const element = entry.marker.getElement();
+      if (label.text !== entry.label.text) element.textContent = label.text;
+      if (label.className !== entry.label.className) element.className = label.className;
+      if (label.color !== entry.label.color) element.style.color = label.color ?? '';
+      if (label.at[0] !== entry.label.at[0] || label.at[1] !== entry.label.at[1]) {
+        entry.marker.setLngLat(label.at);
+      }
+      entry.label = label;
+    }
   });
 
   /** A pin on anything the user has decided about by hand, so locks are visible. */
