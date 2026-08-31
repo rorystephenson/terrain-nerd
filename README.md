@@ -8,7 +8,7 @@ valleys, passes and peaks — but it works for anyone who wants the names.
 
 ## Building a quiz
 
-You choose what to learn. Pan to an area, tick which feature types to include,
+You choose what to learn. Frame an area, tick which feature types to include,
 and narrow them down with one slider each:
 
 | Type | Filter |
@@ -16,6 +16,31 @@ and narrow them down with one slider each:
 | Valleys | length |
 | Mountains | popularity |
 | Passes | popularity |
+
+### Framing the area
+
+The area is a **red frame you drag by its handles**, over a map that pans and
+zooms underneath it. The frame holds still on screen while the ground moves, so
+zooming in to check what you have caught is a look rather than an edit.
+
+It was the whole viewport once, and a viewport is the wrong shape for a valley:
+a screen is a landscape rectangle and the ground people want is usually a strip
+along one valley or a square around one massif, so half of what came back was
+from the next valley over and had to be pinned out by hand. Trimming the frame
+is the same decision made before the download rather than after it.
+
+Two rules, both stated in pixels rather than in degrees, because both are about
+the screen. It cannot shrink below about a fingertip and a half — smaller and
+you cannot tell which handle you grabbed — and it stays clear of the window edge
+and of the panel, so every handle has room to be grabbed *around*. A rule in
+degrees would be worth a different number of pixels at every zoom.
+
+Nothing is reserved for the zoom buttons or the credit; those are drawn above
+the frame instead. An inset for them would be one you cannot see the reason for,
+and it would stop the frame reaching as far one way as it reaches the other.
+
+Reopening a quiz to change its area puts the frame back around the area that
+quiz was built from, with slack on every side so it can be grown as well as cut.
 
 Then hand-correct anything the filter got wrong for you. **Tap a feature to pin
 it**: one that the filter included gets pinned out, one it excluded gets pinned

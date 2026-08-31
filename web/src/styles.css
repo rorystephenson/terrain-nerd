@@ -19,6 +19,19 @@ body {
 }
 
 /*
+ * The map's own controls sit above the builder's crop frame and the dim around
+ * it. They are the map's furniture rather than part of what is being chosen, so
+ * dimming them says something untrue — and the credit has to stay legible in
+ * any case. Above the frame layer, below the panels.
+ */
+.maplibregl-ctrl-top-left,
+.maplibregl-ctrl-top-right,
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
+  z-index: 4;
+}
+
+/*
  * Map attribution: required, so it is always on screen — but it is a credit,
  * not something anyone came here to read. Set as small and as faint as it can
  * be and still be legible, with MapLibre's white plate dropped, so it reads as

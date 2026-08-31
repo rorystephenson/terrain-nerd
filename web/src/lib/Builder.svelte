@@ -64,6 +64,40 @@
   /** Where the map is now, reported by MapView. Output only. */
   let view = $state<[number, number, number, number]>(home);
   let area = $state<[number, number, number, number] | null>(null);
+  /**
+   * What the crop frame currently covers, which is not yet what the pool is
+   * loaded from. Committing is a separate act on purpose: the frame reports a
+   * new area on every pan, and a pool that refetched each time would spend the
+   * whole of choosing an area downloading the ones you passed over.
+   */
+  let pending = $state<[number, number, number, number] | null>(null);
+
+  /** Breathing room between the frame and the panel it is keeping clear of. */
+  const CHROME_GAP_PX = 12;
+  /**
+   * The area panel, measured rather than assumed: it wraps differently at every
+   * width, and it is only measured while it is the one on screen, which is the
+   * only time the frame is open.
+   */
+  let windowWidth = $state(0);
+  let panelWidth = $state(0);
+  let panelHeight = $state(0);
+
+  /**
+   * Room the crop frame has to leave for the panel, on whichever side costs
+   * less: a desktop window has room to the right of it, where a phone's panel
+   * is nearly the full width and only the strip below it is worth having.
+   *
+   * The panel is the only thing reserved for. The map's zoom buttons and credit
+   * are drawn above the frame instead, so the frame may run under them — an
+   * inset for them would be one the user cannot see the reason for, and it
+   * would stop the frame reaching as far one way as it reaches the other.
+   */
+  const selectInset = $derived(
+    panelWidth + CHROME_GAP_PX > 0.45 * windowWidth
+      ? { top: panelHeight + CHROME_GAP_PX }
+      : { left: panelWidth + CHROME_GAP_PX },
+  );
 
   let builder = $state<BuilderState>(seed.builder);
   /**
@@ -243,7 +277,8 @@
   const questions = $derived(questionCount(picked.included));
 
   function useThisArea() {
-    area = view;
+    if (!pending) return;
+    area = pending;
     step = 'features';
   }
 
@@ -279,6 +314,8 @@
   }
 </script>
 
+<svelte:window bind:innerWidth={windowWidth} />
+
 <MapView
   {collection}
   context={context}
@@ -288,22 +325,36 @@
   {shade}
   {places}
   enabled={step === 'features'}
+  selecting={step === 'area' && panelHeight > 0}
+  selected={area}
+  {selectInset}
   onpick={pick}
   onview={(v) => (view = v.view)}
+  onarea={(box) => (pending = box)}
 />
 
-<div class="panel">
-  {#if step === 'area'}
+<!--
+  A panel per step rather than one that changes contents, so the area panel is
+  measured for itself. The crop frame waits on that measurement — it has to know
+  what the panel covers before it can open anywhere sensible — and a shared
+  element would carry the features panel's height across the step change and
+  open the frame against the wrong one.
+-->
+{#if step === 'area'}
+  <div class="panel" bind:clientWidth={panelWidth} bind:clientHeight={panelHeight}>
     <h2>Choose an area</h2>
     <p class="hint">
-      Pan and zoom to where you want to be quizzed. Everything in view becomes available to
-      pick from — you can still move around afterwards.
+      Drag the red frame's handles over the ground you want to be quizzed on, panning and
+      zooming the map underneath it. Everything the frame crosses becomes available to pick
+      from.
     </p>
     <div class="actions">
       <button class="ghost" onclick={oncancel}>Cancel</button>
-      <button class="primary" onclick={useThisArea}>Use this area</button>
+      <button class="primary" disabled={!pending} onclick={useThisArea}>Use this area</button>
     </div>
-  {:else}
+  </div>
+{:else}
+  <div class="panel">
     <div class="head">
       <h2>{editing ? 'Edit quiz' : 'Pick features'}</h2>
       <button class="link" onclick={() => (step = 'area')}>Change area</button>
@@ -374,12 +425,14 @@
         {editing ? 'Save changes' : 'Save quiz'}
       </button>
     </div>
-  {/if}
-</div>
+  </div>
+{/if}
 
 <style>
   .panel {
     position: absolute;
+    /* Above the crop frame, and above the map labels that outrank the map. */
+    z-index: 5;
     top: 0.75rem;
     left: 0.75rem;
     width: min(20rem, calc(100vw - 1.5rem));

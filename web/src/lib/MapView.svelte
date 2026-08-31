@@ -1,7 +1,18 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import maplibregl from 'maplibre-gl';
+  import AreaSelect from './AreaSelect.svelte';
   import { layoutLabels } from './labels.ts';
+  import {
+    clampRect,
+    defaultRect,
+    fitPadding,
+    regionFor,
+    sameRect,
+    scaleRect,
+    type Inset as Chrome,
+    type Rect,
+  } from './selection.ts';
   import {
     buildStyle,
     firstPickable,
@@ -38,6 +49,14 @@
     labels?: MapLabel[];
     /** Build mode: what the current filters and locks make of each feature. */
     shade?: Record<string, Inclusion>;
+    /** Build mode: the crop frame is live, and reports the area it covers. */
+    selecting?: boolean;
+    /** An area to open the frame on, so editing adjusts the one the quiz has. */
+    selected?: [number, number, number, number] | null;
+    /** Room the frame must leave for chrome drawn over the map, in pixels. */
+    selectInset?: Partial<Chrome>;
+    /** The ground inside the frame, reported as it changes. */
+    onarea?: (box: [number, number, number, number]) => void;
     /** Settlement names drawn as an orientation aid. */
     places?: PlaceFeature[];
     enabled?: boolean;
@@ -59,11 +78,15 @@
     revealId = null,
     labels = [],
     shade = {},
+    selecting = false,
+    selected = null,
+    selectInset = {},
     places = [],
     enabled = true,
     chromeTop = 0,
     onpick,
     onview,
+    onarea,
   }: Props = $props();
 
   /** How fast the revealed feature blinks. */
@@ -163,6 +186,16 @@
   let hoveredId = $state<string | null>(null);
   /** Bumped on every move, so label layout recomputes against the new screen. */
   let viewTick = $state(0);
+  /** The canvas the crop frame is measured against, in CSS pixels. */
+  let canvasSize = $state({ width: 0, height: 0 });
+  /**
+   * The crop frame, and the region it was last fitted to.
+   *
+   * The two travel together because carrying a frame across a change of region
+   * needs the one it came from, and a region recomputed from the current canvas
+   * is by then the new one.
+   */
+  let crop = $state<{ rect: Rect; region: Rect } | null>(null);
 
   const pad = (box: [number, number, number, number], lon: number, lat: number) =>
     [
@@ -354,6 +387,100 @@
     instance.jumpTo({ center: camera.center, zoom: camera.zoom });
   }
 
+  /** Where the crop frame may go: the canvas, less its margins and the panel. */
+  const cropRegion = $derived(regionFor(canvasSize, selectInset));
+
+  /** The ground under a frame, and the frame over a piece of ground. */
+  const boxOf = (
+    instance: maplibregl.Map,
+    rect: Rect,
+  ): [number, number, number, number] => {
+    const nw = instance.unproject([rect.left, rect.top]);
+    const se = instance.unproject([rect.right, rect.bottom]);
+    return [nw.lng, se.lat, se.lng, nw.lat];
+  };
+  const rectOf = (instance: maplibregl.Map, box: [number, number, number, number]): Rect => {
+    const nw = instance.project([box[0], box[3]]);
+    const se = instance.project([box[2], box[1]]);
+    return { left: nw.x, top: nw.y, right: se.x, bottom: se.y };
+  };
+
+  /**
+   * Opens the crop frame, and puts it away again.
+   *
+   * Reopening a saved quiz has to offer the area that quiz was built with, so
+   * the map is fitted to it and the frame set to wherever it landed — with
+   * padding that leaves slack on every side, because "change the area" has to
+   * mean either direction and a frame flush against its limits can only shrink.
+   *
+   * Only `selecting` and `selected` are tracked. The region and the canvas are
+   * not: the frame is what reports the area, so one that re-opened on every pan
+   * — or on every window resize, which moves the region — would undo the
+   * trimming that prompted it. `selected` is tracked because it changes only
+   * when an area is committed or recovered, and a frame opened before a saved
+   * area had finished loading should still pick it up.
+   *
+   * The camera move is untracked for a sharper reason. `fitBounds` fires `move`
+   * synchronously, so the handler above runs inside this effect — and `report`
+   * reads `bounds`, which would quietly make an effect that moves the camera
+   * depend on where the camera is. It never settles: each fit lands a few
+   * floating-point ulps from the last, so the frame is recomputed, which fits
+   * again, forever. Untracking the move keeps the reads inside it out of this
+   * effect's dependencies.
+   */
+  $effect(() => {
+    if (!ready || !map || !selecting) {
+      crop = null;
+      return;
+    }
+    const instance = map;
+    const area = selected;
+    const region = untrack(() => cropRegion);
+    if (!area) {
+      crop = { rect: defaultRect(region), region };
+      return;
+    }
+    untrack(() => {
+      instance.fitBounds(
+        [
+          [area[0], area[1]],
+          [area[2], area[3]],
+        ],
+        { padding: fitPadding(canvasSize, region), duration: 0 },
+      );
+      crop = { rect: clampRect(rectOf(instance, area), region), region };
+    });
+  });
+
+  /** A resized window is a different region, so the frame is carried into it. */
+  $effect(() => {
+    const region = cropRegion;
+    const held = untrack(() => crop);
+    if (!held || sameRect(held.region, region)) return;
+    crop = { rect: scaleRect(held.rect, held.region, region), region };
+  });
+
+  /**
+   * What the frame currently covers.
+   *
+   * Recomputed on every move as well as on every drag: the frame holds still on
+   * screen while the ground slides under it, so panning and zooming change the
+   * selection just as dragging a handle does.
+   *
+   * The callback is *read* untracked, not merely called. A parent that stores
+   * what it is handed re-renders, and if that hands down a fresh closure, an
+   * effect depending on it would run again and report again, forever. What the
+   * frame covers should be recomputed when the frame or the camera moves, and
+   * at no other time.
+   */
+  $effect(() => {
+    void viewTick;
+    const held = crop;
+    if (!ready || !map || !held) return;
+    const box = boxOf(map, held.rect);
+    untrack(() => onarea?.(box));
+  });
+
   /**
    * Features that are finished with: answered already, or the wrong one being
    * held up right now. Clicks fall straight through them.
@@ -463,6 +590,7 @@
     instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     instance.on('load', () => {
       frame(instance);
+      canvasSize = sizeOf(instance);
       map = instance;
       ready = true;
       report(instance);
@@ -477,6 +605,7 @@
     // pads outwards, ratchet the framed area wider on every resize.
     instance.on('resize', () => {
       if (mode === 'play') frame(instance);
+      canvasSize = sizeOf(instance);
       viewTick++;
     });
 
@@ -874,6 +1003,13 @@
 </script>
 
 <div class="map" bind:this={container}></div>
+{#if selecting && crop}
+  <AreaSelect
+    rect={crop.rect}
+    region={cropRegion}
+    onchange={(rect) => (crop = { rect, region: cropRegion })}
+  />
+{/if}
 
 <style>
   .map {
