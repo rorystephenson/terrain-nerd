@@ -88,16 +88,27 @@ body {
 }
 
 /*
- * Persistent labels on already-answered features: quieter than the feedback
- * ones, and tinted inline by how many tries the feature took.
+ * Persistent labels on already-answered features.
+ *
+ * Set like the place names — coloured text in a white halo, no plate. These
+ * accumulate: by the end of a round every feature carries one, and as filled
+ * boxes they cover the terrain the round was about. A halo leaves the relief
+ * readable underneath while the ink still says how many tries it took.
  */
 .map-label--answered {
-  font-size: 0.72rem;
-  font-weight: 550;
-  padding: 0.12rem 0.38rem;
-  opacity: 0.92;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  /* Overridden inline with the grade colour; a fallback so it is never white. */
+  color: #2b3138;
+  font-size: 0.76rem;
+  font-weight: 700;
   animation: none;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 3px rgba(255, 255, 255, 0.92);
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.95),
+    0 0 3px rgba(255, 255, 255, 0.95);
 }
 
 /* The flashing answer: pinned above everything else on the map. */

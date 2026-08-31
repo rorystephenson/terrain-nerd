@@ -29,6 +29,18 @@ export const GRADE_STOPS: [number, string][] = [
   [1, REVEAL],
 ];
 
+/** Linear blend of two `#rrggbb` colours. */
+function mixHex(a: string, b: string, t: number): string {
+  const channel = (i: number) =>
+    Math.round(
+      Number.parseInt(a.slice(i, i + 2), 16) * (1 - t) +
+        Number.parseInt(b.slice(i, i + 2), 16) * t,
+    )
+      .toString(16)
+      .padStart(2, '0');
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
+}
+
 /** The same ramp as the map expression, for HTML labels. */
 export function gradeColor(grade: number): string {
   const g = Math.max(0, Math.min(1, grade));
@@ -38,15 +50,24 @@ export function gradeColor(grade: number): string {
   }
   const upper = GRADE_STOPS.find(([at]) => at > g);
   if (!upper) return lowHex;
-  const t = (g - lowAt) / (upper[0] - lowAt);
-  const mix = (a: string, b: string, i: number) =>
-    Math.round(
-      Number.parseInt(a.slice(i, i + 2), 16) * (1 - t) +
-        Number.parseInt(b.slice(i, i + 2), 16) * t,
-    )
-      .toString(16)
-      .padStart(2, '0');
-  return `#${mix(lowHex, upper[1], 1)}${mix(lowHex, upper[1], 3)}${mix(lowHex, upper[1], 5)}`;
+  return mixHex(lowHex, upper[1], (g - lowAt) / (upper[0] - lowAt));
+}
+
+/** The ink place names are set in. */
+const LABEL_INK = '#2b3138';
+/** How far the ramp is carried towards it. Every stop then clears 4:1 on white. */
+const LABEL_DARKEN = 0.4;
+
+/**
+ * The same grade, for a name written straight onto the map.
+ *
+ * The ramp itself is picked to sit *behind* white text, so used as text on a
+ * white halo its lighter end — the olive of a near miss — barely registers.
+ * Carrying every stop the same distance towards the ink keeps the green-to-red
+ * reading intact while making all four legible against the terrain.
+ */
+export function gradeLabelColor(grade: number): string {
+  return mixHex(gradeColor(grade), LABEL_INK, LABEL_DARKEN);
 }
 
 export type MapMode = 'play' | 'build';

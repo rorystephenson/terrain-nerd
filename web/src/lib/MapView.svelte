@@ -359,7 +359,14 @@
     };
   });
 
-  type Drawn = { key: string; text: string; at: [number, number]; className: string; color?: string };
+  type Drawn = {
+    key: string;
+    text: string;
+    at: [number, number];
+    className: string;
+    /** Ink for the label's text, where the class does not already fix it. */
+    color?: string;
+  };
 
   /**
    * Everything to write on the map, already thinned so nothing overlaps.
@@ -452,7 +459,8 @@
       const element = document.createElement('div');
       element.className = label.className;
       element.textContent = label.text;
-      if (label.color) element.style.background = label.color;
+      // Answered names are set in their grade colour rather than plated in it.
+      if (label.color) element.style.color = label.color;
       return new maplibregl.Marker({ element, anchor: 'bottom' })
         .setLngLat(label.at)
         .addTo(instance);

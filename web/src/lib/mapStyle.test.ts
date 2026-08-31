@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 
-import { buildStyle, gradeColor, GRADE_STOPS, LAYER_GEOMETRY, PICK_LAYERS } from './mapStyle.ts';
+import {
+  buildStyle,
+  gradeColor,
+  gradeLabelColor,
+  GRADE_STOPS,
+  LAYER_GEOMETRY,
+  PICK_LAYERS,
+} from './mapStyle.ts';
 import { ELEVATION_STOPS } from './terrain.ts';
 
 const empty = { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
@@ -126,6 +133,24 @@ test('gradeColor matches the ramp the map paints with', () => {
   assert.notEqual(mid, GRADE_STOPS[0][1]);
   assert.notEqual(mid, GRADE_STOPS[1][1]);
   assert.match(mid, /^#[0-9a-f]{6}$/);
+});
+
+/** WCAG relative luminance of an `#rrggbb` colour. */
+function luminance(hex: string): number {
+  const channels = [1, 3, 5]
+    .map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+test('every grade reads as text on the white halo answered labels use', () => {
+  for (const [at] of GRADE_STOPS) {
+    const contrast = 1.05 / (luminance(gradeLabelColor(at)) + 0.05);
+    assert.ok(contrast >= 4, `grade ${at} is ${contrast.toFixed(2)}:1 against white`);
+  }
+  // The olive mid-ramp is the stop that fails without the darkening, so the
+  // label colour must not simply be the fill colour.
+  assert.notEqual(gradeLabelColor(0.34), gradeColor(0.34));
 });
 
 test('feature source promotes the numeric id that feature-state indexes on', () => {

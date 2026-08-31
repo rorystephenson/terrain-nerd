@@ -8,7 +8,7 @@
   import { loadByIds, loadContext, loadIndex, loadPlaces } from './lib/chunks.ts';
   import { padBox } from './lib/builder.ts';
   import { levelFor, PLACE_PAD } from './lib/places.ts';
-  import { gradeColor } from './lib/mapStyle.ts';
+  import { gradeLabelColor } from './lib/mapStyle.ts';
   import {
     deleteQuiz as removeQuiz,
     loadBest,
@@ -170,7 +170,7 @@
         featureId: a.targetId,
         text: a.name,
         tone: 'answered',
-        color: gradeColor(a.grade),
+        color: gradeLabelColor(a.grade),
       });
     }
     if (revealId && question) {
