@@ -22,6 +22,7 @@
     createQuiz,
     currentQuestion,
     isFinished,
+    reveal,
     score,
     triesLeft,
     MAX_TRIES,
@@ -234,6 +235,21 @@
     saveQuizzes(imported);
   }
 
+  /**
+   * "Show me" — the player is stuck and wants the answer.
+   *
+   * Without it the only way out of a question you cannot answer is to click
+   * wrong things until the tries run out, which is busywork that teaches
+   * nothing. It grades exactly as a reveal, and the answer still has to be
+   * clicked, so the map work of actually going to find it is unchanged.
+   */
+  function showAnswer() {
+    if (!quiz || locked || finished || quiz.revealing) return;
+    clearTimers();
+    feedback = null;
+    quiz = reveal(quiz).state;
+  }
+
   function pick(clickedId: string | null) {
     if (!quiz || locked || finished) return;
     clearTimers();
@@ -313,7 +329,9 @@
         index={quiz.index}
         total={quiz.questions.length}
         correct={tally.correct}
+        canReveal={Boolean(question) && !revealId && !locked && !finished}
         onquit={toList}
+        onreveal={showAnswer}
       />
       {#if finished}
         <Results

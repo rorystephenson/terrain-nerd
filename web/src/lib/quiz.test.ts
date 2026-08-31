@@ -6,6 +6,7 @@ import {
   createQuiz,
   currentQuestion,
   isFinished,
+  reveal,
   score,
   triesLeft,
   MAX_TRIES,
@@ -112,6 +113,31 @@ test('clicking the shown answer advances and grades it as revealed', () => {
   assert.equal(result.state.answers[0].revealed, true);
   assert.equal(result.state.answers[0].firstTry, false);
   assert.equal(result.state.answers[0].grade, 1, 'fully red');
+});
+
+test('asking to be shown lands in the same place as running out of tries', () => {
+  const state = createQuiz(pool, seeded(2));
+  const asked = currentQuestion(state)!.name;
+  const shown = reveal(state);
+  assert.equal(shown.kind, 'reveal');
+  assert.equal(shown.state.revealing, true);
+  assert.equal(shown.state.index, 0, 'the question stays open until it is clicked');
+  assert.equal(currentQuestion(shown.state)!.name, asked);
+  assert.equal(triesLeft(shown.state), 0);
+
+  const found = attempt(shown.state, currentQuestion(shown.state)!.targetId);
+  assert.equal(found.kind, 'found');
+  assert.equal(found.state.index, 1);
+  assert.equal(found.state.answers[0].revealed, true);
+  assert.equal(found.state.answers[0].firstTry, false);
+  assert.equal(found.state.answers[0].grade, 1, 'no cheaper than being beaten by it');
+});
+
+test('asking to be shown again while it is already showing changes nothing', () => {
+  const shown = reveal(createQuiz(pool, seeded(2))).state;
+  const again = reveal(shown);
+  assert.equal(again.kind, 'nudge');
+  assert.equal(again.state, shown);
 });
 
 test('recovering on a later try is not revealed, and not first-try', () => {

@@ -163,6 +163,21 @@ export function attempt(state: QuizState, clickedId: string | null): AttemptOutc
   };
 }
 
+/**
+ * The player asks to be shown, without spending the tries first.
+ *
+ * It lands in exactly the same place as running out of tries: the answer starts
+ * flashing, the question stays open until it is clicked, and it grades as
+ * revealed. Clicking three wrong things on purpose to get there taught nothing,
+ * so there is no reason to make anyone do it — and grading it any softer than a
+ * genuine reveal would quietly make giving up the cheaper move.
+ */
+export function reveal(state: QuizState): AttemptOutcome {
+  const question = currentQuestion(state);
+  if (!question || state.revealing) return { kind: 'nudge', state };
+  return { kind: 'reveal', state: { ...state, revealing: true }, missedId: null };
+}
+
 export function score(state: QuizState): {
   correct: number;
   solved: number;

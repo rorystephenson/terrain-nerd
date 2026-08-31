@@ -15,7 +15,10 @@
     index: number;
     total: number;
     correct: number;
+    /** False while feedback is up or the answer is already showing. */
+    canReveal: boolean;
     onquit: () => void;
+    onreveal: () => void;
   };
 
   let {
@@ -27,7 +30,9 @@
     index,
     total,
     correct,
+    canReveal,
     onquit,
+    onreveal,
   }: Props = $props();
 
   const tone = $derived(
@@ -47,23 +52,26 @@
     <span class="pos">{correct} first-try</span>
   </div>
 
-  <p class="ask" aria-live="polite">
-    {#if revealing && question}
-      {#if feedback?.kind === 'miss' && feedback.name}
-        That's <strong>{feedback.name}</strong> — click the flashing one
-      {:else}
-        Out of tries. Click <strong>{question.name}</strong>, now flashing, to continue
+  <div class="row">
+    <p class="ask" aria-live="polite">
+      {#if revealing && question}
+        {#if feedback?.kind === 'miss' && feedback.name}
+          That's <strong>{feedback.name}</strong> — click the flashing one
+        {:else}
+          Click <strong>{question.name}</strong>, now flashing, to continue
+        {/if}
+      {:else if feedback?.kind === 'correct'}
+        Correct
+      {:else if feedback?.kind === 'miss'}
+        {#if feedback.name}That's <strong>{feedback.name}</strong>.{:else}Nothing there.{/if}
+        Try again — {feedback.triesLeft}
+        {feedback.triesLeft === 1 ? 'try' : 'tries'} left
+      {:else if question}
+        Find <strong>{question.name}</strong>
       {/if}
-    {:else if feedback?.kind === 'correct'}
-      Correct
-    {:else if feedback?.kind === 'miss'}
-      {#if feedback.name}That's <strong>{feedback.name}</strong>.{:else}Nothing there.{/if}
-      Try again — {feedback.triesLeft}
-      {feedback.triesLeft === 1 ? 'try' : 'tries'} left
-    {:else if question}
-      Find <strong>{question.name}</strong>
-    {/if}
-  </p>
+    </p>
+    <button class="show" onclick={onreveal} disabled={!canReveal}>Don't know</button>
+  </div>
 
   <div class="bar" role="presentation">
     <div class="fill" style:width="{total === 0 ? 0 : (index / total) * 100}%"></div>
@@ -122,6 +130,37 @@
     transition: background-color 180ms ease;
   }
   .pip.spent { background: rgba(0, 0, 0, 0.16); }
+
+  .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  /*
+   * Red, because pressing it costs the question — same as being beaten by it.
+   * Muted red rather than a solid one: it has to be there the moment you are
+   * stuck, but it is the answer to every question, so it should never be the
+   * obvious thing to reach for.
+   */
+  .show {
+    flex: none;
+    align-self: center;
+    padding: 0.28rem 0.7rem;
+    font: inherit;
+    font-size: 0.78rem;
+    color: var(--wrong);
+    background: rgba(214, 69, 69, 0.08);
+    border: 1px solid rgba(214, 69, 69, 0.35);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color 150ms ease, border-color 150ms ease;
+  }
+  .show:hover:not(:disabled) {
+    background: rgba(214, 69, 69, 0.16);
+    border-color: var(--wrong);
+  }
+  .show:disabled { opacity: 0.35; cursor: default; }
 
   .ask {
     margin: 0.25rem 0 0.55rem;
