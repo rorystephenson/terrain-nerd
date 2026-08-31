@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import maplibregl from 'maplibre-gl';
   import AreaSelect from './AreaSelect.svelte';
-  import { layoutLabels } from './labels.ts';
+  import { labelReachesScreen, layoutLabels } from './labels.ts';
   import {
     clampRect,
     defaultRect,
@@ -819,8 +819,13 @@
         // builder asking about this one, not a name it wants on the map.
         if (!included && !hovered) continue;
 
-        const at = project(feature.properties.anchor);
-        if (at.x < 0 || at.y < 0 || at.x > size.width || at.y > size.height) continue;
+        // Drawn once any of the name reaches the map, not once its anchor does
+        // — the same rule the place names use. A valley's anchor sits mid-line,
+        // so culling by the point alone withheld names whose text was already
+        // well inside the edge.
+        if (!labelReachesScreen(project(feature.properties.anchor), feature.properties.name, size)) {
+          continue;
+        }
 
         out.push({
           key: `f:${feature.id}`,

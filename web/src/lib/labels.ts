@@ -26,6 +26,7 @@ export type LabelCandidate<T> = {
 };
 
 export type Screen = { x: number; y: number };
+export type Rect = { x1: number; y1: number; x2: number; y2: number };
 
 /** Rough on-screen size of a label, in pixels. */
 const CHAR_WIDTH = 7.2;
@@ -34,8 +35,42 @@ const HEIGHT = 20;
 /** Labels must clear each other by this much to both be drawn. */
 const GAP = 4;
 
+/**
+ * The ink a label puts on the screen.
+ *
+ * Markers are anchored by their bottom edge, so a label hangs above its point
+ * and is centred on it. An estimate of the text's width rather than a
+ * measurement, deliberately: it is wanted before the label exists in the DOM,
+ * and it only has to be close.
+ */
+export function labelRect(at: Screen, text: string): Rect {
+  const halfWidth = (text.length * CHAR_WIDTH + PADDING) / 2;
+  return { x1: at.x - halfWidth, y1: at.y - HEIGHT, x2: at.x + halfWidth, y2: at.y };
+}
+
+/** Does a rectangle overlap the screen at all? */
+const reaches = (rect: Rect, size: { width: number; height: number }): boolean =>
+  rect.x2 >= 0 && rect.y2 >= 0 && rect.x1 <= size.width && rect.y1 <= size.height;
+
+/**
+ * Does any part of the label reach the screen?
+ *
+ * The test has to be the label's rectangle, never its anchor point. A point
+ * test holds a name back until its *centre* crosses the edge, so a label whose
+ * text is already well over the map is still not drawn — and since the anchor
+ * is up to half a label's width behind the ink, the name appears to pop into
+ * existence some way in from the edge instead of sliding in from it.
+ */
+export function labelReachesScreen(
+  at: Screen,
+  text: string,
+  size: { width: number; height: number },
+): boolean {
+  return reaches(labelRect(at, text), size);
+}
+
 export type LayoutOptions = {
-  /** Screen size. Only labels landing inside it are returned. */
+  /** Screen size. Only labels whose text reaches it are returned. */
   width: number;
   height: number;
   /**
@@ -89,12 +124,13 @@ export function layoutLabels<T>(
       continue;
     }
 
-    const halfWidth = (candidate.text.length * CHAR_WIDTH + PADDING) / 2;
+    // The ink, and the ink plus the clearance it demands of its neighbours.
+    const rect = labelRect(at, candidate.text);
     const box = {
-      x1: at.x - halfWidth - GAP,
-      y1: at.y - HEIGHT - GAP,
-      x2: at.x + halfWidth + GAP,
-      y2: at.y + GAP,
+      x1: rect.x1 - GAP,
+      y1: rect.y1 - GAP,
+      x2: rect.x2 + GAP,
+      y2: rect.y2 + GAP,
     };
 
     const clashes = placed.some(
@@ -105,7 +141,9 @@ export function layoutLabels<T>(
     // Placed either way: a label off the edge still has to hold its ground, or
     // panning it into view would evict whatever moved in beside it.
     placed.push(box);
-    if (at.x >= 0 && at.y >= 0 && at.x <= options.width && at.y <= options.height) {
+    // Drawn as soon as any of the name reaches the screen, so panning slides
+    // labels in from the edge instead of popping them in half a width later.
+    if (reaches(rect, options)) {
       out.push({ item: candidate.item, text: candidate.text, at });
     }
   }
