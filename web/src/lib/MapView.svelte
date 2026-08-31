@@ -301,6 +301,16 @@
    * lands, so there is nothing to correct after the fact and inertia is left to
    * the engine. Below `leashZoom` the two limits cross and the axis pins to the
    * middle of the range it could not satisfy.
+   *
+   * It reads `chrome` when it is asked, not when it is built, so a leash handed
+   * over once is already current for whatever height the prompt bar has grown
+   * to by the time the player next moves the camera. Nothing re-registers it,
+   * and nothing should: `setTransformConstrain` re-constrains the camera on the
+   * spot, and it does so without firing `move`. The GL layers redraw at the new
+   * centre, every `Marker` — the names, the pins, the reveal pulse — waits for
+   * a `move` that never comes, and the labels are left behind the map they
+   * belong to. A limit that only has to hold from the next gesture onwards is
+   * not worth moving the ground under someone mid-question for.
    */
   function leash(instance: maplibregl.Map, box: [number, number, number, number]) {
     return (lngLat: maplibregl.LngLat, zoom: number) => {
@@ -538,89 +548,101 @@
   /**
    * Builds the map exactly once.
    *
-   * Every read here is untracked on purpose. `buildStyle` and the initial
-   * `bounds` read `indexed`, `context` and `bbox`, and left tracked they make
-   * the map itself depend on its own data — so loading a chunk, or toggling a
-   * feature type, would tear the whole map down and construct a new one, which
-   * reads on screen as the map zooming out and back in. The source is kept
-   * current by the `setData` effects below instead.
+   * The whole body is untracked, not just the reads that plainly need it.
+   * Almost everything touched here is state the map is answerable *to* rather
+   * than built *from* — `buildStyle` reads `indexed` and `context`, the opening
+   * camera reads `bounds`, the leash reads `chrome` — and any one of them left
+   * tracked makes the map depend on its own data. Loading a chunk, or the
+   * prompt bar growing a line, then tears the map down and constructs a new
+   * one: it reads on screen as the map resetting under the player, and it
+   * spends a WebGL context. A browser grants only a handful of those and takes
+   * the oldest back when it runs out, so a few rebuilds cost the live map its
+   * context and the round its picture. Everything here is kept current by the
+   * narrower effects below instead.
+   *
+   * Untracking read by read is not enough, because not every read is written
+   * here. `setTransformConstrain` runs the leash straight away to re-constrain
+   * the camera, so `chrome` is read inside this effect by a line that mentions
+   * neither.
    */
-  $effect(() => {
-    const initial = untrack(() => ({
-      camera:
-        mode === 'play'
-          ? opening(
-              { width: container.clientWidth, height: container.clientHeight },
-              bounds,
-            )
-          : null,
-      style: buildStyle(
-        context as GeoJSON.FeatureCollection,
-        indexed as GeoJSON.FeatureCollection,
-        mode,
-      ),
-    }));
+  $effect(() =>
+    untrack(() => {
+      const initial = {
+        camera:
+          mode === 'play'
+            ? opening(
+                { width: container.clientWidth, height: container.clientHeight },
+                bounds,
+              )
+            : null,
+        style: buildStyle(
+          context as GeoJSON.FeatureCollection,
+          indexed as GeoJSON.FeatureCollection,
+          mode,
+        ),
+      };
 
-    const instance = new maplibregl.Map({
-      container,
-      // Built looking where it means to stay. The builder has no leash, so it
-      // is framed the same way `frame` frames it, by the same call.
-      ...(initial.camera
-        ? { center: initial.camera.center, zoom: initial.camera.zoom, minZoom: initial.camera.minZoom }
-        : {
-            bounds: pad(bbox, 0.02, 0.02),
-            fitBoundsOptions: { padding: framePad },
-          }),
-      maxZoom: MAX_ZOOM,
-      dragRotate: false,
-      attributionControl: false,
-      style: initial.style,
-    });
+      const instance = new maplibregl.Map({
+        container,
+        // Built looking where it means to stay. The builder has no leash, so it
+        // is framed the same way `frame` frames it, by the same call.
+        ...(initial.camera
+          ? { center: initial.camera.center, zoom: initial.camera.zoom, minZoom: initial.camera.minZoom }
+          : {
+              bounds: pad(bbox, 0.02, 0.02),
+              fitBoundsOptions: { padding: framePad },
+            }),
+        maxZoom: MAX_ZOOM,
+        dragRotate: false,
+        attributionControl: false,
+        style: initial.style,
+      });
 
-    // Before the first frame is drawn, so nothing can be shown off the leash.
-    if (mode === 'play') instance.setTransformConstrain(leash(instance, untrack(() => bounds)));
+      // Before the first frame is drawn, so nothing can be shown off the leash.
+      if (mode === 'play') instance.setTransformConstrain(leash(instance, bounds));
 
-    // Added before the zoom buttons so it lands under them, flush in the corner:
-    // MapLibre *prepends* controls in a bottom corner, so the first one added is
-    // the one nearest the edge.
-    //
-    // `compact: false` because the collapsed form is a white pill with an info
-    // button — furniture that looks like a control you are meant to press, on a
-    // screen where pressing things is the whole game. Styled down to a line of
-    // faint text in styles.css.
-    instance.addControl(
-      new maplibregl.AttributionControl({
-        compact: false,
-        customAttribution: '© OpenStreetMap contributors',
-      }),
-      'bottom-right',
-    );
-    instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    instance.on('load', () => {
-      frame(instance);
-      canvasSize = sizeOf(instance);
-      map = instance;
-      report(instance);
-    });
-    instance.on('move', () => {
-      report(instance);
-      viewTick++;
-    });
-    // A resized window changes what "fits", so the play leash has to be recut.
-    // The builder deliberately does not re-frame: its camera belongs to the
-    // user, and re-fitting would both move it under them and, because a fit
-    // pads outwards, ratchet the framed area wider on every resize.
-    instance.on('resize', () => {
-      if (mode === 'play') frame(instance);
-      canvasSize = sizeOf(instance);
-      viewTick++;
-    });
+      // Added before the zoom buttons so it lands under them, flush in the corner:
+      // MapLibre *prepends* controls in a bottom corner, so the first one added is
+      // the one nearest the edge.
+      //
+      // `compact: false` because the collapsed form is a white pill with an info
+      // button — furniture that looks like a control you are meant to press, on a
+      // screen where pressing things is the whole game. Styled down to a line of
+      // faint text in styles.css.
+      instance.addControl(
+        new maplibregl.AttributionControl({
+          compact: false,
+          customAttribution: '© OpenStreetMap contributors',
+        }),
+        'bottom-right',
+      );
+      instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+      instance.on('load', () => {
+        frame(instance);
+        canvasSize = sizeOf(instance);
+        map = instance;
+        report(instance);
+      });
+      instance.on('move', () => {
+        report(instance);
+        viewTick++;
+      });
+      // A resized window changes what "fits", so the play leash has to be recut.
+      // The builder deliberately does not re-frame: its camera belongs to the
+      // user, and re-fitting would both move it under them and, because a fit
+      // pads outwards, ratchet the framed area wider on every resize.
+      instance.on('resize', () => {
+        if (mode === 'play') frame(instance);
+        canvasSize = sizeOf(instance);
+        viewTick++;
+      });
 
-    return () => {
-      map = undefined;
-      instance.remove();
-    };
-  });
+      return () => {
+        map = undefined;
+        instance.remove();
+      };
+    }),
+  );
 
   // The builder swaps in a whole new area as you pan, so the source is updated
   // in place rather than rebuilding the map.
