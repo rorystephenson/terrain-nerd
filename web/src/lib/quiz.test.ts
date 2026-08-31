@@ -178,11 +178,20 @@ test('tries reset for the next question', () => {
   assert.equal(triesLeft(state), MAX_TRIES);
 });
 
-test('clicking empty terrain costs a try and is recorded as a miss', () => {
+test('clicking empty terrain is not an answer and costs nothing', () => {
   const state = createQuiz(pool, seeded(4));
   const result = attempt(state, null);
-  assert.equal(result.kind, 'retry');
-  assert.equal(result.state.misses[0], null);
+  assert.equal(result.kind, 'nudge');
+  assert.equal(result.state, state);
+  assert.equal(triesLeft(result.state), MAX_TRIES);
+});
+
+test('clicking empty terrain while the answer is showing changes nothing either', () => {
+  let state = createQuiz(pool, seeded(4));
+  state = reveal(state).state;
+  const result = attempt(state, null);
+  assert.equal(result.kind, 'nudge');
+  assert.equal(result.state, state);
 });
 
 test('accepts either feature when two share a name', () => {

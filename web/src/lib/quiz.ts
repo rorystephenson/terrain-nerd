@@ -11,7 +11,7 @@ export type Question = {
 
 export type AnsweredQuestion = Question & {
   /** Wrong clicks that counted against the tries. */
-  misses: (string | null)[];
+  misses: string[];
   /** Found without a single wrong click — what the score is based on. */
   firstTry: boolean;
   /** The tries ran out and the answer had to be pointed out. */
@@ -27,7 +27,7 @@ export type QuizState = {
   questions: Question[];
   index: number;
   /** Wrong clicks so far on the current question. */
-  misses: (string | null)[];
+  misses: string[];
   /**
    * True once the tries are spent. The answer is on screen and the question
    * stays open until the player clicks it — further wrong clicks cost nothing.
@@ -109,7 +109,7 @@ export const gradeFor = (misses: number, revealed: boolean): number =>
 function complete(
   state: QuizState,
   question: Question,
-  misses: (string | null)[],
+  misses: string[],
   revealed: boolean,
 ): QuizState {
   return {
@@ -137,12 +137,17 @@ function complete(
  * question stays open: the player has to click it before moving on, and wrong
  * clicks in the meantime cost nothing. Being shown where it is teaches far less
  * than having to go and find it.
+ *
+ * Clicking bare ground is not an answer at all. It says nothing about what the
+ * player thinks — a slipped finger, a tap to dismiss something, a click meant
+ * for the map itself — so it costs nothing and leaves the question untouched.
  */
 export function attempt(state: QuizState, clickedId: string | null): AttemptOutcome {
   const question = currentQuestion(state);
   if (!question) return { kind: 'correct', state };
+  if (clickedId === null) return { kind: 'nudge', state };
 
-  const hit = clickedId !== null && question.acceptedIds.includes(clickedId);
+  const hit = question.acceptedIds.includes(clickedId);
 
   if (state.revealing) {
     if (hit) return { kind: 'found', state: complete(state, question, state.misses, true) };

@@ -252,6 +252,9 @@
 
   function pick(clickedId: string | null) {
     if (!quiz || locked || finished) return;
+    // Bare ground is not a guess. It costs nothing, and it does not even clear
+    // the feedback still on screen from the click before it.
+    if (clickedId === null) return;
     clearTimers();
 
     const outcome = attempt(quiz, clickedId);
