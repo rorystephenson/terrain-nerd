@@ -115,19 +115,21 @@ body {
 }
 
 /*
- * Persistent labels on already-answered features.
+ * Labels that name a feature for as long as it is on the map: the ones already
+ * answered while playing, and the ones in the quiz being built.
  *
- * Set like the place names — coloured text in a white halo, no plate. These
- * accumulate: by the end of a round every feature carries one, and as filled
- * boxes they cover the terrain the round was about. A halo leaves the relief
- * readable underneath while the ink still says how many tries it took.
+ * Set like the place names — coloured text in a white halo, no plate. Both
+ * kinds accumulate until every feature on screen carries one, and as filled
+ * boxes they cover the terrain they are about. A halo leaves the relief
+ * readable underneath, and lets two names overlap without either being lost —
+ * which is what makes it affordable to draw all of them rather than thinning
+ * them against each other.
  */
-.map-label--answered {
+.map-label--answered,
+.map-label--build {
   padding: 0;
   background: none;
   box-shadow: none;
-  /* Overridden inline with the grade colour; a fallback so it is never white. */
-  color: #2b3138;
   font-size: 0.76rem;
   font-weight: 700;
   animation: none;
@@ -138,21 +140,43 @@ body {
     0 0 3px rgba(255, 255, 255, 0.95);
 }
 
+/* Overridden inline with the grade colour; a fallback so it is never white. */
+.map-label--answered { color: #2b3138; }
+
 /* The flashing answer: pinned above everything else on the map. */
 .map-label--reveal { z-index: 3; }
 
 /*
  * Builder chrome. Like the play-mode labels these are MapLibre markers created
  * imperatively, so they cannot live in a component's scoped CSS.
+ *
+ * The violet the features themselves are drawn in, so a name and its line say
+ * the same thing. Dark enough as ink to hold 7:1 on the white halo.
  */
-.map-label--picked {
-  background: #1f7a8c;
-  animation: none;
-}
-.map-label--picked.is-hover {
-  background: #1d232b;
+.map-label--build { color: #6d28d9; }
+/* Only ever seen under the pointer: a feature the quiz is currently leaving out. */
+.map-label--build.is-out { color: #3f4a5a; }
+
+/*
+ * The one the pointer is on, which is the builder asking a direct question
+ * about a single feature — so it answers on a plate rather than in the terrain,
+ * and outranks every other label on the map instead of jostling with them.
+ */
+.map-label--build.is-hover {
+  z-index: 4;
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fff;
+  background: #6d28d9;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
   outline: 2px solid rgba(255, 255, 255, 0.85);
+  -webkit-text-stroke: 0;
+  text-shadow: none;
 }
+/* Neutral, not violet: this one is not in the quiz, and the plate should not imply it is. */
+.map-label--build.is-out.is-hover { background: #1d232b; }
 
 /*
  * Settlement names: an orientation aid, not an answer. Deliberately quieter
@@ -199,7 +223,7 @@ body {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   transform: translate(11px, -11px);
 }
-.map-pin--in { background: #1f7a8c; }
+.map-pin--in { background: #6d28d9; }
 .map-pin--out {
   background: #8a94a2;
   /* A bar through it: "I said no to this one", distinct from merely filtered out. */

@@ -51,8 +51,15 @@ export const NEUTRAL = '#3f4a5a';
 export const MISS = '#e0921a';
 /** The answer being pointed out. */
 export const REVEAL = '#d64545';
-/** A feature that will be in the quiz being built. */
-export const PICKED = '#1f7a8c';
+/**
+ * A feature that will be in the quiz being built.
+ *
+ * The same violet a feature waits in while playing, and for the same reason:
+ * it is the one colour on this map that means "a feature of the quiz", so the
+ * teal it replaces was asking the builder to learn a second vocabulary for the
+ * features it was about to hand to the player.
+ */
+export const PICKED = UNANSWERED;
 
 /**
  * How an answered feature is coloured, one entry per outcome: found on the
@@ -149,7 +156,14 @@ const playColor: ExpressionSpecification = [
   UNANSWERED,
 ] as ExpressionSpecification;
 
-/** In the builder, colour says only one thing: is this in the quiz or not. */
+/**
+ * In the builder, colour says only one thing: is this in the quiz or not.
+ *
+ * No hover case, unlike playing. There the hover is the whole interaction —
+ * one line has to be picked out of a screen full of identical ones — whereas
+ * here the pointer already brings up the feature's name on a plate, which says
+ * which one it is far more plainly than a change of lightness could.
+ */
 const buildColor: ExpressionSpecification = [
   'case',
   ['boolean', ['feature-state', 'included'], false],

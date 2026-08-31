@@ -110,7 +110,6 @@
   const MAX_ZOOM = 14;
   /** Below this, naming every candidate would be unreadable anyway. */
   const NAME_FROM_ZOOM = 9.5;
-  const MAX_FEATURE_LABELS = 45;
   /**
    * A ceiling, not a quota. Which names appear should follow zoom and available
    * space; a tight cap would make it follow the viewport instead, so that
@@ -118,9 +117,10 @@
    */
   const MAX_PLACE_LABELS = 140;
   /**
-   * How far off screen labels still compete, in pixels. Comfortably wider than
-   * the longest place name, so a label sliding into view cannot displace one
-   * already drawn.
+   * How far off screen place names still compete, in pixels. Comfortably wider
+   * than the longest of them, so one sliding into view cannot displace a name
+   * already drawn. Only the place names are thinned; the builder's own labels
+   * are all drawn (see `drawn`).
    */
   const LABEL_PAD = 320;
   /** How long two fingers may rest before their lift stops being a tap. */
@@ -797,25 +797,38 @@
         }
       }
     } else if (instance.getZoom() >= NAME_FROM_ZOOM) {
-      const candidates = collection.features
-        .filter((f) => isIncluded(shade[f.id] ?? 'auto-out') || f.id === hoveredId)
-        .map((f) => ({
-          // Hovering is a direct question about one feature, so it always wins.
-          priority: f.id === hoveredId ? 1e6 : (f.properties.popularity ?? f.properties.lengthKm),
-          text: f.properties.name,
-          item: f,
-          key: f.id,
-        }));
-      for (const placed of layoutLabels(candidates, (f) => project(f.properties.anchor), {
-        ...size,
-        pad: LABEL_PAD,
-        max: MAX_FEATURE_LABELS,
-      })) {
+      /*
+       * Every selected feature is named, with no collision pass — deliberately
+       * unlike the place names below.
+       *
+       * Thinning is right for the basemap, where the names are scenery and any
+       * one of them is expendable. It is wrong here: these names *are* the
+       * selection, and a builder counting what is in the quiz cannot be shown
+       * an arbitrary subset of it. Dropping the pass also drops the shuffling
+       * that came with it, where hovering promoted one name over everything
+       * around it and evicted whatever it happened to touch.
+       *
+       * Set as plateless haloed text rather than filled boxes, which is what
+       * makes that affordable: they overlap without blotting each other or the
+       * terrain out, so nothing has to be evicted to keep the map readable.
+       */
+      for (const feature of collection.features) {
+        const included = isIncluded(shade[feature.id] ?? 'auto-out');
+        const hovered = feature.id === hoveredId;
+        // Excluded features are named only while pointed at — that is the
+        // builder asking about this one, not a name it wants on the map.
+        if (!included && !hovered) continue;
+
+        const at = project(feature.properties.anchor);
+        if (at.x < 0 || at.y < 0 || at.x > size.width || at.y > size.height) continue;
+
         out.push({
-          key: `f:${placed.item.id}`,
-          text: placed.text,
-          at: placed.item.properties.anchor,
-          className: `map-label map-label--picked${placed.item.id === hoveredId ? ' is-hover' : ''}`,
+          key: `f:${feature.id}`,
+          text: feature.properties.name,
+          at: feature.properties.anchor,
+          className:
+            `map-label map-label--build` +
+            `${included ? '' : ' is-out'}${hovered ? ' is-hover' : ''}`,
         });
       }
     }
@@ -890,7 +903,17 @@
       }
       const element = entry.marker.getElement();
       if (label.text !== entry.label.text) element.textContent = label.text;
-      if (label.className !== entry.label.className) element.className = label.className;
+      if (label.className !== entry.label.className) {
+        // Swapped class by class, never by assigning `className`. MapLibre puts
+        // its own classes on the element it was handed — `maplibregl-marker`,
+        // which is what positions it absolutely, and `maplibregl-marker-covered`
+        // which it toggles as the terrain hides it. Overwriting the attribute
+        // took those with it, and an unpositioned label falls back into the flow
+        // of the map container as a full-width block: hovering one feature left
+        // a neighbouring name stretched across the map until it was redrawn.
+        element.classList.remove(...entry.label.className.split(' '));
+        element.classList.add(...label.className.split(' '));
+      }
       if (label.color !== entry.label.color) element.style.color = label.color ?? '';
       if (label.at[0] !== entry.label.at[0] || label.at[1] !== entry.label.at[1]) {
         entry.marker.setLngLat(label.at);
