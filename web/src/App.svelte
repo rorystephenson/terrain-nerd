@@ -39,7 +39,7 @@
   } from './lib/types.ts';
 
   /** How long each kind of feedback stays on screen. */
-  const FEEDBACK_MS = { correct: 550, miss: 1200 };
+  const FEEDBACK_MS = { correct: 550, miss: 2400 };
 
   type Feedback =
     | { kind: 'miss'; missedId: string | null; name: string; triesLeft: number }
