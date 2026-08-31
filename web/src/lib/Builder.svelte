@@ -114,6 +114,19 @@
   let places = $state.raw<PlaceFeature[]>([]);
   let loading = $state(false);
   let name = $state(seed.name);
+  /**
+   * Folded away to a pill, so the map underneath can be worked on.
+   *
+   * Picking features is half panel and half map — you set the sliders, then you
+   * tap the ones the filter got wrong. On a phone the panel is nearly the whole
+   * screen, so the tapping half is done blind, and there is no scrolling out of
+   * its way: it is pinned to the viewport, not to the page.
+   *
+   * The pill keeps the question count, because that number is the answer to the
+   * thing you minimised for — every pin moves it, and a fold that hid the
+   * feedback would just make you unfold again after each tap.
+   */
+  let minimised = $state(false);
 
   /**
    * Everything in the area, every kind — filtered for display rather than
@@ -280,6 +293,8 @@
     if (!pending) return;
     area = pending;
     step = 'features';
+    // A new area is a new count: come back to the panel that reports it.
+    minimised = false;
   }
 
   function pick(id: string | null) {
@@ -353,11 +368,33 @@
       <button class="primary" disabled={!pending} onclick={useThisArea}>Use this area</button>
     </div>
   </div>
+{:else if minimised}
+  <!--
+    The folded panel. It sits where the panel's own top corner was, so unfolding
+    reads as the same thing growing back rather than a new one arriving.
+  -->
+  <button class="restack" onclick={() => (minimised = false)}>
+    {#if loading}
+      <span class="mini-loading">Loading the area…</span>
+    {:else}
+      <span class="mini-count">{questions}</span>
+      <span class="mini-label">question{questions === 1 ? '' : 's'}</span>
+    {/if}
+    <span class="mini-hint">Show panel</span>
+  </button>
 {:else}
   <div class="panel">
     <div class="head">
       <h2>{editing ? 'Edit quiz' : 'Pick features'}</h2>
-      <button class="link" onclick={() => (step = 'area')}>Change area</button>
+      <div class="head-actions">
+        <button class="link" onclick={() => (step = 'area')}>Change area</button>
+        <button
+          class="minimise"
+          onclick={() => (minimised = true)}
+          title="Minimise"
+          aria-label="Minimise the panel"
+        >−</button>
+      </div>
     </div>
 
     {#each index.kinds as kind (kind.id)}
@@ -444,8 +481,66 @@
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
     backdrop-filter: blur(6px);
   }
+  /*
+   * The folded panel: same corner, same plate, shrunk to the one number that is
+   * worth watching while the map is being tapped.
+   */
+  .restack {
+    position: absolute;
+    z-index: 5;
+    top: 0.75rem;
+    left: 0.75rem;
+    max-width: calc(100vw - 1.5rem);
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.55rem 0.9rem;
+    font: inherit;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.96);
+    border: 0;
+    border-radius: 30px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+  }
+  .restack:hover { filter: brightness(0.98); }
+  .mini-count { font-size: 1.1rem; font-weight: 700; }
+  .mini-label,
+  .mini-loading { color: var(--muted); font-size: 0.85rem; }
+  .mini-hint {
+    margin-left: 0.15rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
   h2 { margin: 0; font-size: 1.05rem; }
   .head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+  /* Wrapping as a pair, so the minimise glyph never lands alone under the heading. */
+  .head-actions { display: flex; align-items: baseline; gap: 0.9rem; flex: 0 0 auto; }
+  /*
+   * A minus rather than the word, on the app's own icon-button idiom — the name
+   * lives in `title`/`aria-label`. No box around it: the row it shares is a text
+   * link, not the strip of buttons the quiz list draws.
+   *
+   * The hit area is grown to a thumb and the margins pull the glyph back to
+   * where it looks right, asymmetrically. It takes the panel's own right
+   * padding, where there is nothing to hit by mistake, and stops short on the
+   * left of "Change area" — a mis-tap there costs you the area you just framed.
+   */
+  .minimise {
+    margin: -0.75rem -1rem -0.75rem 0;
+    padding: 0.75rem 1rem 0.75rem 0.75rem;
+    font: inherit;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+  .minimise:hover { color: #1d232b; }
   .hint, .sub { color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
   .hint { margin: 0.5rem 0 0; }
   .sub { margin: 0.3rem 0 0; }

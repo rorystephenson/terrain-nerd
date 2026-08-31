@@ -51,6 +51,11 @@ amount of slider dragging, which is the point — you can filter to valleys over
 Excluded features stay on the map, dimmed, so you can see what you are choosing
 against and click one back in. Pinned ones carry a badge.
 
+The panel **minimises to a pill** in its own corner, because pinning is done on
+the map and on a phone the panel covers most of it. The pill keeps the question
+count, which is the number you minimised to watch: every pin moves it, and a
+fold that hid the count would only be unfolded again after each tap.
+
 Quizzes save to `localStorage` and can be replayed and edited. Nothing is synced
 anywhere, so each quiz has a **save to file** button and there is a matching
 load. A file holds the quiz itself and never your scores — those belong to the
