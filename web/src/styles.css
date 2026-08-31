@@ -26,6 +26,11 @@ body {
  * styles have to live outside any component's scoped CSS.
  */
 .map-label {
+  /*
+   * Above the settlement names. Both are MapLibre markers in one container, so
+   * without this the place names win purely by being appended last.
+   */
+  z-index: 2;
   transform: translateY(-8px);
   padding: 0.2rem 0.5rem;
   border-radius: 5px;
@@ -127,6 +132,8 @@ body {
  * is the fallback where that is unsupported.
  */
 .map-place {
+  /* Orientation aid, so it sits under anything the quiz itself is saying. */
+  z-index: 1;
   transform: translateY(-4px);
   font-size: 0.74rem;
   font-weight: 600;
