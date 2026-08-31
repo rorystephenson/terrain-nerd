@@ -16,18 +16,29 @@ export const REVEAL = '#d64545';
 export const PICKED = '#1f7a8c';
 
 /**
- * How an answered feature is coloured, from found-first-try to had-to-be-shown.
+ * How an answered feature is coloured, one entry per outcome: found on the
+ * first guess, on the second, on the third, and had to be shown.
  *
  * A miss is not a failure, it is a near miss, and the colour should say so:
- * green shades through yellow to red as the tries are spent, which turns the
- * finished map into a legible picture of what you actually know.
+ * green shades through yellow-green and orange to red as the tries are spent,
+ * which turns the finished map into a legible picture of what you actually
+ * know. Each is dark enough to read against pale valley floor and bare rock
+ * alike, since the same ramp inks the answered names.
  */
-export const GRADE_STOPS: [number, string][] = [
-  [0, '#1f9d55'],
-  [0.34, '#a8bc1f'],
-  [0.67, '#e08a1a'],
-  [1, REVEAL],
-];
+const GRADE_COLORS = ['#1f9d55', '#a5a61b', '#c26a12', REVEAL];
+
+/**
+ * The ramp as interpolation stops, spread evenly across 0..1.
+ *
+ * Spread rather than hand-placed so they line up with the grades the quiz
+ * actually produces — `misses / MAX_TRIES` — however many tries it allows. A
+ * test pins that alignment, because a ramp whose stops fell between the grades
+ * would only ever show blends of the colours chosen here.
+ */
+export const GRADE_STOPS: [number, string][] = GRADE_COLORS.map((hex, i) => [
+  i / (GRADE_COLORS.length - 1),
+  hex,
+]);
 
 /** Linear blend of two `#rrggbb` colours. */
 function mixHex(a: string, b: string, t: number): string {

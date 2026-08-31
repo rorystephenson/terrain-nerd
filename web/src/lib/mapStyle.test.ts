@@ -10,6 +10,7 @@ import {
   LAYER_GEOMETRY,
   PICK_LAYERS,
 } from './mapStyle.ts';
+import { gradeFor, MAX_TRIES } from './quiz.ts';
 import { ELEVATION_STOPS } from './terrain.ts';
 
 const empty = { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
@@ -133,6 +134,21 @@ test('gradeColor matches the ramp the map paints with', () => {
   assert.notEqual(mid, GRADE_STOPS[0][1]);
   assert.notEqual(mid, GRADE_STOPS[1][1]);
   assert.match(mid, /^#[0-9a-f]{6}$/);
+});
+
+test('every outcome lands on a ramp stop of its own', () => {
+  assert.equal(GRADE_STOPS.length, MAX_TRIES + 1, 'one colour per outcome');
+  const outcomes = [
+    ...Array.from({ length: MAX_TRIES }, (_, misses) => gradeFor(misses, false)),
+    gradeFor(MAX_TRIES, true),
+  ];
+  const colours = outcomes.map((grade) => gradeColor(grade));
+  // Landing between stops would show blends rather than the chosen colours.
+  for (const [i, grade] of outcomes.entries()) {
+    assert.equal(grade, GRADE_STOPS[i][0], `outcome ${i} sits on stop ${i}`);
+    assert.equal(colours[i], GRADE_STOPS[i][1]);
+  }
+  assert.equal(new Set(colours).size, colours.length, 'every outcome reads differently');
 });
 
 /** WCAG relative luminance of an `#rrggbb` colour. */

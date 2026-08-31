@@ -150,15 +150,21 @@ test('recovering on a later try is not revealed, and not first-try', () => {
 });
 
 test('grade darkens with each miss, from green to red', () => {
+  // Every number of misses you can recover from gets its own grade, evenly
+  // spaced below 1 — so each has a distinct colour, whatever MAX_TRIES is.
   const grades: number[] = [];
-  for (const missCount of [0, 1, 2, 3]) {
+  for (let missCount = 0; missCount < MAX_TRIES; missCount++) {
     let state = createQuiz(pool, seeded(2));
     for (let i = 0; i < missCount; i++) {
       state = (attempt(state, wrongId(state)) as { state: QuizState }).state;
     }
     grades.push(attempt(state, currentQuestion(state)!.targetId).state.answers[0].grade);
   }
-  assert.deepEqual(grades, [0, 0.25, 0.5, 0.75]);
+  assert.deepEqual(
+    grades,
+    Array.from({ length: MAX_TRIES }, (_, i) => i / MAX_TRIES),
+  );
+  assert.ok(grades.every((g) => g < 1), 'recovering is never graded as a reveal');
   // And a revealed answer sits at the far end.
   const shown = exhaust(createQuiz(pool, seeded(2)));
   assert.equal(attempt(shown, currentQuestion(shown)!.targetId).state.answers[0].grade, 1);

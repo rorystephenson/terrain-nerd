@@ -37,7 +37,7 @@ export type QuizState = {
 };
 
 /** Wrong clicks allowed before the answer is given away. */
-export const MAX_TRIES = 4;
+export const MAX_TRIES = 3;
 
 /** What a click did. The UI drives its feedback off this. */
 export type AttemptOutcome =
