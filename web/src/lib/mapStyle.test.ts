@@ -8,7 +8,9 @@ import {
   gradeColor,
   gradeLabelColor,
   GRADE_STOPS,
+  CASING_LAYERS,
   LAYER_GEOMETRY,
+  LINE_LAYERS,
   PICK_LAYERS,
 } from './mapStyle.ts';
 import { gradeFor, MAX_TRIES } from './quiz.ts';
@@ -86,7 +88,7 @@ test('elevation drives the tint through a sane, ordered ramp', () => {
 
 test('the builder dims what it is leaving out instead of hiding it', () => {
   // You have to be able to see what you are choosing against, and click it back in.
-  const line = buildMode.layers.find((l) => l.id === 'features-line');
+  const line = buildMode.layers.find((l) => l.id === LINE_LAYERS[0]);
   const opacity = (line as { paint?: Record<string, unknown> }).paint?.['line-opacity'];
   assert.ok(Array.isArray(opacity), 'excluded features need their own opacity');
   assert.ok(JSON.stringify(opacity).includes('included'));
@@ -96,9 +98,66 @@ test('the builder dims what it is leaving out instead of hiding it', () => {
 });
 
 test('playing never dims by inclusion, which is a builder-only idea', () => {
-  const line = style.layers.find((l) => l.id === 'features-line');
+  const line = style.layers.find((l) => l.id === LINE_LAYERS[0]);
   const opacity = (line as { paint?: Record<string, unknown> }).paint?.['line-opacity'];
   assert.equal(opacity, 1);
+});
+
+test('casings and fills interleave, so a feature is drawn over a whole feature', () => {
+  // MapLibre orders by layer, not by feature. With one casing layer under one
+  // fill layer, a valley's white halo is buried by the next valley's colour and
+  // the two run together; with the casing hung above instead, both halos draw
+  // over both colours and a crossing reads as a lattice. Alternating pairs is
+  // the only arrangement in which one feature passes cleanly over another.
+  const order = style.layers.map((l) => l.id);
+  assert.equal(CASING_LAYERS.length, LINE_LAYERS.length);
+  assert.ok(CASING_LAYERS.length > 1, 'a single pair cannot order two features');
+  for (const [i, casing] of CASING_LAYERS.entries()) {
+    assert.ok(order.indexOf(casing) >= 0 && order.indexOf(LINE_LAYERS[i]) >= 0, `pair ${i}`);
+    assert.equal(order.indexOf(LINE_LAYERS[i]), order.indexOf(casing) + 1, `pair ${i} adjacent`);
+    if (i > 0) {
+      assert.ok(order.indexOf(casing) > order.indexOf(LINE_LAYERS[i - 1]), `pair ${i} above ${i - 1}`);
+    }
+  }
+  // Every feature must land in exactly one pair, or it is drawn twice or not at all.
+  const slices = CASING_LAYERS.map((id) => JSON.stringify(LAYER_GEOMETRY[id]));
+  assert.equal(new Set(slices).size, CASING_LAYERS.length, 'each pair takes a different slice');
+  for (const [i, id] of LINE_LAYERS.entries()) {
+    assert.deepEqual(LAYER_GEOMETRY[id], LAYER_GEOMETRY[CASING_LAYERS[i]], `pair ${i} matches`);
+  }
+});
+
+test('a casing is opaque while playing, or the feature under it shows through', () => {
+  for (const id of CASING_LAYERS) {
+    const casing = style.layers.find((l) => l.id === id) as { paint?: Record<string, unknown> };
+    assert.equal(casing.paint!['line-opacity'], 1, id);
+    // Wider than the fill it carries, or there is no halo to separate anything.
+    const fill = style.layers.find((l) => l.id === LINE_LAYERS[0]) as {
+      paint?: Record<string, unknown>;
+    };
+    const widest = (ramp: unknown) => Math.max(...(JSON.parse(JSON.stringify(ramp)) as unknown[])
+      .flat(9).filter((v): v is number => typeof v === 'number'));
+    assert.ok(widest(casing.paint!['line-width']) > widest(fill.paint!['line-width']), id);
+  }
+});
+
+test('feature ink shrinks faster than linearly as the map zooms out', () => {
+  // Screen pixels buy ten times as much ground at z8 as at z12, so a linear
+  // ramp makes plainly separate features merge into one blob when zoomed out.
+  const ramps = [CASING_LAYERS[0], LINE_LAYERS[0], 'features-point'].map((id) => {
+    const layer = style.layers.find((l) => l.id === id) as { paint?: Record<string, unknown> };
+    return (layer.paint!['line-width'] ?? layer.paint!['circle-radius']) as unknown[];
+  });
+  for (const ramp of ramps) {
+    assert.equal(ramp[0], 'interpolate');
+    assert.equal((ramp[1] as unknown[])[0], 'exponential');
+    // Linear or flatter would grow the ground footprint on the way out.
+    assert.ok(((ramp[1] as [string, number])[1]) > 1, 'curved, not linear');
+    assert.deepEqual(ramp[2], ['zoom']);
+    // Never hairline: a feature too faint to see is one the player cannot click.
+    const stops = ramp.slice(3).filter((_, i) => i % 2 === 1) as number[];
+    assert.ok(Math.min(...stops) > 1, 'thin, not invisible');
+  }
 });
 
 test('every hit-test layer exists in the style', () => {
@@ -123,7 +182,12 @@ test('feature layers are restricted by geometry', () => {
     assert.deepEqual(layer.filter, LAYER_GEOMETRY[layer.id], `${layer.id} filter not applied`);
   }
   assert.deepEqual(LAYER_GEOMETRY['features-point'], ['==', ['geometry-type'], 'Point']);
-  assert.deepEqual(LAYER_GEOMETRY['features-line'], ['!=', ['geometry-type'], 'Point']);
+  for (const id of [...CASING_LAYERS, ...LINE_LAYERS]) {
+    assert.ok(
+      JSON.stringify(LAYER_GEOMETRY[id]).includes('["!=",["geometry-type"],"Point"]'),
+      `${id} still lets points through`,
+    );
+  }
 });
 
 test('gradeColor matches the ramp the map paints with', () => {

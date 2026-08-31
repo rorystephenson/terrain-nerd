@@ -144,17 +144,91 @@ const buildOpacity: ExpressionSpecification = [
 ] as ExpressionSpecification;
 
 /**
- * Which geometries each feature layer is allowed to draw.
+ * How many casing/fill layer pairs the line features are dealt across.
+ *
+ * MapLibre orders by *layer*, not by feature, so a single casing layer sits
+ * beneath the whole of the fill layer rather than beneath its own feature: one
+ * valley's white halo is buried by the next valley's colour and the two run
+ * together as one shape. Hanging a hollow edge above the fills instead only
+ * moves the seam — then *both* features' edges draw over both fills, and a
+ * crossing reads as a lattice rather than as one valley passing over another.
+ *
+ * The only ordering MapLibre will honour between a feature's casing and another
+ * feature's fill is layer order, so the pair is repeated: casing 0, fill 0,
+ * casing 1, fill 1, and so on. A feature in a later pair is drawn over the whole
+ * of an earlier one, halo included, which is what "on top" has to mean.
+ *
+ * Six pairs, dealt on `idx`, is the exchange rate. Two features only flatten
+ * against each other if they land in the same pair, and because `idx` follows
+ * file order — which is grid-cell order, so roughly spatial — neighbours are
+ * dealt into different pairs rather than clumped. Twelve line layers over a
+ * source holding one round's features is a rounding error next to the two
+ * hillshade passes.
+ */
+const STACK = 6;
+
+/** Lines and points share one source, so each layer has to say what it is for. */
+const LINE_ONLY: FilterSpecification = ['!=', ['geometry-type'], 'Point'];
+
+/** The slice of the stack a layer draws: every sixth feature by index. */
+const dealt = (pair: number): FilterSpecification =>
+  ['all', LINE_ONLY, ['==', ['%', ['coalesce', ['get', 'idx'], 0], STACK], pair]] as FilterSpecification;
+
+/** Casing layer ids, bottom pair first. */
+export const CASING_LAYERS = Array.from({ length: STACK }, (_, i) => `features-casing-${i}`);
+/** Fill layer ids, bottom pair first. These are what a click is tested against. */
+export const LINE_LAYERS = Array.from({ length: STACK }, (_, i) => `features-line-${i}`);
+
+/**
+ * Which features each feature layer is allowed to draw.
  *
  * A circle layer renders one circle per *vertex*, so without this the peak layer
- * speckles every valley line with dots at its segment joins. Lines and points
- * share one source, so each layer has to say what it is for.
+ * speckles every valley line with dots at its segment joins.
  */
 export const LAYER_GEOMETRY: Record<string, FilterSpecification> = {
-  'features-casing': ['!=', ['geometry-type'], 'Point'],
-  'features-line': ['!=', ['geometry-type'], 'Point'],
+  ...Object.fromEntries(CASING_LAYERS.map((id, i) => [id, dealt(i)])),
+  ...Object.fromEntries(LINE_LAYERS.map((id, i) => [id, dealt(i)])),
   'features-point': ['==', ['geometry-type'], 'Point'],
 };
+
+/**
+ * How wide a feature is drawn, in screen pixels, at a given zoom.
+ *
+ * The interpolation is exponential rather than linear because the thing that
+ * has to stay constant is not the width on screen but the *ground* the ink
+ * covers. A pixel is 425m of Trentino at z8 and 27m at z12, so a linear ramp
+ * from 4px to 8px means a valley whose stroke spans 1.7km when zoomed out and
+ * 0.2km when zoomed in — a tenfold spread, which is why two features that are
+ * plainly separate up close merge into one blob from far away. An exponential
+ * base bends the ramp the other way: growth is weighted towards the last zoom
+ * level or two, so the low end shrinks towards the ground rather than away.
+ *
+ * 1.6 rather than 2 because the honest answer — hold the ground constant — is
+ * not the legible one. Base 2 puts a valley at 2.2px when zoomed out, which
+ * declutters beautifully and reads as a scratch. This sits between that and the
+ * old linear ramp: at z10 a valley is 4.6px against the 6px it used to be.
+ *
+ * The floor is set by legibility, not by hit-testing. Picking uses a 4px and
+ * then a 14px query box around the click (see `pickAt`), so the tolerance, not
+ * the stroke, is what keeps a thin line clickable.
+ */
+const width = (near: number, far: number): ExpressionSpecification =>
+  ['interpolate', ['exponential', 1.6], ['zoom'], 8, near, 12, far] as ExpressionSpecification;
+
+/**
+ * Draw order *within* one pair of the stack: shorter features on top.
+ *
+ * The stack decides which feature wins between pairs; this decides it for the
+ * two that happen to share one. MapLibre otherwise draws in source order, so a
+ * long valley buries a short one purely because of where it landed in the file.
+ * Length is the meaningful tie-break — the feature with less room to be seen
+ * gets it.
+ */
+const SHORTEST_ON_TOP: ExpressionSpecification = [
+  '-',
+  0,
+  ['coalesce', ['get', 'lengthKm'], 0],
+] as ExpressionSpecification;
 
 /**
  * The whole basemap, built inline.
@@ -297,40 +371,57 @@ export function buildStyle(
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 14, 3.6],
         },
       },
-      {
-        id: 'features-casing',
-        type: 'line',
-        source: 'features',
-        filter: LAYER_GEOMETRY['features-casing'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#ffffff',
-          'line-opacity': mode === 'build' ? (buildOpacity as ExpressionSpecification) : 0.65,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 7, 12, 13],
+      // Casing, fill, casing, fill … so a feature is drawn over the whole of the
+      // one below it rather than over only its colour. See STACK.
+      ...Array.from({ length: STACK }, (_, pair) => [
+        {
+          id: CASING_LAYERS[pair],
+          type: 'line' as const,
+          source: 'features',
+          filter: LAYER_GEOMETRY[CASING_LAYERS[pair]],
+          layout: {
+            'line-cap': 'round' as const,
+            'line-join': 'round' as const,
+            'line-sort-key': SHORTEST_ON_TOP,
+          },
+          paint: {
+            'line-color': '#ffffff',
+            // Opaque, because a casing you can see through is a casing the
+            // feature underneath still shows in — which is the overlap this
+            // whole arrangement exists to remove.
+            'line-opacity': mode === 'build' ? (buildOpacity as ExpressionSpecification) : 1,
+            'line-width': width(6.4, 13.2),
+          },
         },
-      },
-      {
-        id: 'features-line',
-        type: 'line',
-        source: 'features',
-        filter: LAYER_GEOMETRY['features-line'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 4, 12, 8],
-          'line-color': color,
-          'line-opacity': opacity,
+        {
+          id: LINE_LAYERS[pair],
+          type: 'line' as const,
+          source: 'features',
+          filter: LAYER_GEOMETRY[LINE_LAYERS[pair]],
+          layout: {
+            'line-cap': 'round' as const,
+            'line-join': 'round' as const,
+            'line-sort-key': SHORTEST_ON_TOP,
+          },
+          paint: {
+            'line-width': width(3.2, 8),
+            'line-color': color,
+            'line-opacity': opacity,
+          },
         },
-      },
+      ]).flat(),
       {
         id: 'features-point',
         type: 'circle',
         source: 'features',
         filter: LAYER_GEOMETRY['features-point'],
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 5, 12, 9],
+          'circle-radius': width(4.2, 9),
           'circle-color': color,
           'circle-opacity': opacity,
-          'circle-stroke-width': 2,
+          // Already per-feature: a circle layer draws each dot's stroke with its
+          // own fill, so peaks never bury one another's edge the way lines did.
+          'circle-stroke-width': width(1.6, 2.2),
           'circle-stroke-color': '#ffffff',
           'circle-stroke-opacity': mode === 'build' ? (buildOpacity as ExpressionSpecification) : 0.9,
         },
@@ -339,8 +430,19 @@ export function buildStyle(
   };
 }
 
-/** Layers the click hit-test queries. */
-export const PICK_LAYERS = ['features-line', 'features-point'];
+/**
+ * Layers the click hit-test queries: every fill in the stack, and the peaks.
+ *
+ * The casings are deliberately absent. A casing is wider than the feature it
+ * carries, so querying it would make a click land on a feature the player can
+ * see they missed.
+ *
+ * Order here does not matter — MapLibre walks the style top layer down when it
+ * assembles the results — but the consequence does: hits come back topmost
+ * first, so `firstPickable` returns whichever feature is drawn over the other.
+ * The click and the eye pick the same valley.
+ */
+export const PICK_LAYERS = [...LINE_LAYERS, 'features-point'];
 
 /** The shape of a hit, as much of it as picking cares about. */
 export type PickHit = { properties?: { osmId?: unknown } | null };
