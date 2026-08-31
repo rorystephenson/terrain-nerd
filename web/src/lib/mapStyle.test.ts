@@ -4,6 +4,7 @@ import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 
 import {
   buildStyle,
+  firstPickable,
   gradeColor,
   gradeLabelColor,
   GRADE_STOPS,
@@ -180,4 +181,27 @@ test('terrain source is a keyless terrarium DEM', () => {
   assert.equal(source.type, 'raster-dem');
   assert.equal(source.encoding, 'terrarium');
   assert.ok(source.tiles?.[0] && !/[?&](key|access_token|api_key)=/i.test(source.tiles[0]));
+});
+
+const hit = (osmId: unknown) => ({ properties: { osmId } });
+
+test('picking takes the first hit when nothing is spent', () => {
+  assert.equal(firstPickable([hit('valley/a'), hit('valley/b')], new Set()), 'valley/a');
+});
+
+test('an answered feature is skipped, and what is behind it picked instead', () => {
+  assert.equal(firstPickable([hit('valley/a'), hit('valley/b')], new Set(['valley/a'])), 'valley/b');
+});
+
+test('a click that only lands on spent features picks nothing at all', () => {
+  const spent = new Set(['valley/a', 'valley/b']);
+  assert.equal(firstPickable([hit('valley/a'), hit('valley/b')], spent), null);
+});
+
+test('hits without a usable id are ignored', () => {
+  assert.equal(firstPickable([hit(undefined), { properties: null }, hit(7)], new Set()), null);
+});
+
+test('nothing under the click picks nothing', () => {
+  assert.equal(firstPickable([], new Set()), null);
 });

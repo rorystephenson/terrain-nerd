@@ -2,7 +2,13 @@
   import { untrack } from 'svelte';
   import maplibregl from 'maplibre-gl';
   import { layoutLabels } from './labels.ts';
-  import { buildStyle, LAYER_GEOMETRY, PICK_LAYERS, type MapMode } from './mapStyle.ts';
+  import {
+    buildStyle,
+    firstPickable,
+    LAYER_GEOMETRY,
+    PICK_LAYERS,
+    type MapMode,
+  } from './mapStyle.ts';
   import { isIncluded, isLocked } from './builder.ts';
   import type {
     ContextCollection,
@@ -76,6 +82,10 @@
    * already drawn.
    */
   const LABEL_PAD = 320;
+  /** How long two fingers may rest before their lift stops being a tap. */
+  const TWO_FINGER_TAP_MS = 500;
+  /** How far a two-finger tap may travel and still be a tap. MapLibre's own. */
+  const TAP_SLOP_PX = 30;
 
   /**
    * MapLibre feature-state needs a stable id it can index on, so every feature
@@ -146,6 +156,14 @@
   }
 
   /**
+   * Features that are finished with: answered already, or the wrong one being
+   * held up right now. Clicks fall straight through them.
+   */
+  const spent = $derived(
+    new Set(missId ? [...Object.keys(graded), missId] : Object.keys(graded)),
+  );
+
+  /**
    * Two-stage hit test: a tight box first so a deliberate click on one of two
    * adjacent features lands where the player aimed, then a forgiving one so
    * thin lines and small circles stay clickable on a trackpad.
@@ -159,8 +177,8 @@
         ],
         { layers: PICK_LAYERS.filter((id) => map!.getLayer(id)) },
       );
-      const osmId = hits[0]?.properties?.osmId;
-      if (typeof osmId === 'string') return osmId;
+      const osmId = firstPickable(hits, spent);
+      if (osmId !== null) return osmId;
     }
     return null;
   }
@@ -531,18 +549,69 @@
   $effect(() => {
     if (!ready || !map) return;
     const instance = map;
+
+    /*
+     * Double tapping does not zoom.
+     *
+     * A tap that answers the question and a tap that is half of a zoom look
+     * identical until the second one arrives, so keeping both would mean
+     * holding every answer back for the length of the double-tap window before
+     * it could count. Zooming has other ways in — pinch, the wheel, the +/-
+     * buttons, and the two-finger tap below — and none of them costs a try.
+     */
+    instance.doubleClickZoom.disable();
+
+    const zoomBy = (at: { x: number; y: number }, out: boolean) => {
+      const snap = instance.getZoomSnap();
+      const target = instance.getZoom() + (out ? -1 : 1);
+      instance.easeTo({
+        duration: 300,
+        zoom: snap > 0 ? Math.round(target / snap) * snap : target,
+        around: instance.unproject([at.x, at.y]),
+      });
+    };
+
+    /**
+     * Two fingers down and up again: MapLibre's zoom out, which went quiet with
+     * the rest of its double-press handling. A pinch starts the same way, so a
+     * gesture that travels is left to the pinch handler.
+     */
+    let twoFinger: { at: maplibregl.Point; time: number } | null = null;
+
     const onClick = (event: maplibregl.MapMouseEvent) => {
       if (enabled) onpick(pickAt(event.point));
+    };
+    const onTouchStart = (event: maplibregl.MapTouchEvent) => {
+      twoFinger =
+        event.points.length === 2 ? { at: event.point, time: event.originalEvent.timeStamp } : null;
+    };
+    const onTouchMove = (event: maplibregl.MapTouchEvent) => {
+      if (twoFinger && event.point.dist(twoFinger.at) > TAP_SLOP_PX) twoFinger = null;
+    };
+    const onTouchEnd = (event: maplibregl.MapTouchEvent) => {
+      // A touchend reports the fingers that just left, so the ones still down
+      // have to be read off the DOM event: a stagger is still one gesture.
+      if (!twoFinger || event.originalEvent.touches.length > 0) return;
+      const tap = twoFinger;
+      twoFinger = null;
+      if (event.originalEvent.timeStamp - tap.time < TWO_FINGER_TAP_MS) zoomBy(tap.at, true);
     };
     const onMove = (event: maplibregl.MapMouseEvent) => {
       const hit = enabled ? pickAt(event.point) : null;
       instance.getCanvas().style.cursor = hit ? 'pointer' : '';
       if (mode === 'build') hoveredId = hit;
     };
+
     instance.on('click', onClick);
+    instance.on('touchstart', onTouchStart);
+    instance.on('touchmove', onTouchMove);
+    instance.on('touchend', onTouchEnd);
     instance.on('mousemove', onMove);
     return () => {
       instance.off('click', onClick);
+      instance.off('touchstart', onTouchStart);
+      instance.off('touchmove', onTouchMove);
+      instance.off('touchend', onTouchEnd);
       instance.off('mousemove', onMove);
     };
   });

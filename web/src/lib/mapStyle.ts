@@ -323,3 +323,23 @@ export function buildStyle(
 
 /** Layers the click hit-test queries. */
 export const PICK_LAYERS = ['features-line', 'features-point'];
+
+/** The shape of a hit, as much of it as picking cares about. */
+export type PickHit = { properties?: { osmId?: unknown } | null };
+
+/**
+ * The first hit still worth picking.
+ *
+ * Features that are done with — answered, or the wrong one currently being
+ * highlighted — are skipped rather than returned, so a click that lands on one
+ * reads as a click on the terrain behind it. Nobody means to pick a feature
+ * whose name is already written on the map, and the commonest way it happens is
+ * the second half of a double tap: it can only ever cost a try.
+ */
+export function firstPickable(hits: readonly PickHit[], spent: ReadonlySet<string>): string | null {
+  for (const hit of hits) {
+    const osmId = hit.properties?.osmId;
+    if (typeof osmId === 'string' && !spent.has(osmId)) return osmId;
+  }
+  return null;
+}
