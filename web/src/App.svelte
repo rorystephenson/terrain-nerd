@@ -1,5 +1,6 @@
 <script lang="ts">
   import Builder from './lib/Builder.svelte';
+  import Confirm from './lib/Confirm.svelte';
   import MapView from './lib/MapView.svelte';
   import Minimap from './lib/Minimap.svelte';
   import Prompt from './lib/Prompt.svelte';
@@ -64,6 +65,8 @@
   let feedback = $state<Feedback | null>(null);
   let locked = $state(false);
   let collapsed = $state(false);
+  /** The back button is waiting on an answer before it throws the round away. */
+  let confirmingQuit = $state(false);
   let viewState = $state<ViewState>({ view: [0, 0, 0, 0], covers: true });
   /** Measured, not assumed: the prompt grows with the question and the window. */
   let promptHeight = $state(0);
@@ -150,6 +153,21 @@
     feedback?.kind === 'miss' ? feedback.triesLeft : quiz ? triesLeft(quiz) : MAX_TRIES,
   );
 
+  /**
+   * Whether leaving now would cost the player something.
+   *
+   * A round is only written to the scores once it is finished, so anything
+   * short of that is thrown away by going back — but only worth asking about
+   * once there is something to throw away. Opening a zone and immediately
+   * deciding it was the wrong one is not a mistake worth a dialog, and neither
+   * is leaving a finished round, whose score is already saved.
+   */
+  const quitLosesProgress = $derived(
+    quiz !== null &&
+      !finished &&
+      (quiz.answers.length > 0 || quiz.misses.length > 0 || quiz.revealing),
+  );
+
   /** Set while the tries are spent and the answer must be clicked to continue. */
   const revealId = $derived(quiz?.revealing ? (question?.targetId ?? null) : null);
   const missId = $derived(feedback?.kind === 'miss' ? feedback.missedId : null);
@@ -199,6 +217,7 @@
     feedback = null;
     locked = false;
     collapsed = false;
+    confirmingQuit = false;
     quiz = null;
     features = [];
     screen = { at: 'play', spec };
@@ -210,6 +229,7 @@
     feedback = null;
     locked = false;
     collapsed = false;
+    confirmingQuit = false;
     quiz = createQuiz(features);
   }
 
@@ -218,8 +238,15 @@
     feedback = null;
     locked = false;
     collapsed = false;
+    confirmingQuit = false;
     quiz = null;
     screen = { at: 'list' };
+  }
+
+  /** Back, via the dialog when there is a part-finished round behind it. */
+  function requestQuit() {
+    if (quitLosesProgress) confirmingQuit = true;
+    else toList();
   }
 
   function onSaved(spec: QuizSpec) {
@@ -317,7 +344,7 @@
         total={quiz.questions.length}
         correct={tally.correct}
         canReveal={Boolean(question) && !revealId && !locked && !finished}
-        onquit={toList}
+        onquit={requestQuit}
         onreveal={showAnswer}
         onheight={(px) => (promptHeight = px)}
       />
@@ -359,6 +386,20 @@
           onreplay={replay}
           onmenu={toList}
           nameOf={(id) => nameById.get(id) ?? 'empty ground'}
+        />
+      {/if}
+      <!--
+        Guarding the back button, not the finished-results one: that round is
+        already in the scores, so there is nothing there to lose.
+      -->
+      {#if confirmingQuit}
+        <Confirm
+          title="Leave this round?"
+          body="You'll lose your progress."
+          confirmLabel="Leave"
+          cancelLabel="Keep playing"
+          onconfirm={toList}
+          oncancel={() => (confirmingQuit = false)}
         />
       {/if}
     {:else}
