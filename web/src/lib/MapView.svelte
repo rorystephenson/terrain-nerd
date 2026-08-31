@@ -181,8 +181,16 @@
   });
 
   let container: HTMLDivElement;
+  /**
+   * The map, once it is usable, and `undefined` again the moment it goes away,
+   * so `map` alone answers "is there a map to talk to".
+   *
+   * Effect teardowns that undo a highlight must read this rather than the
+   * instance they captured: on unmount Svelte tears effects down in the order
+   * they were created, so the map — built by the first effect below — is already
+   * removed by the time they run, and a removed map has no style to write to.
+   */
   let map: maplibregl.Map | undefined = $state();
-  let ready = $state(false);
   let hoveredId = $state<string | null>(null);
   /** Bumped on every move, so label layout recomputes against the new screen. */
   let viewTick = $state(0);
@@ -429,7 +437,7 @@
    * effect's dependencies.
    */
   $effect(() => {
-    if (!ready || !map || !selecting) {
+    if (!map || !selecting) {
       crop = null;
       return;
     }
@@ -476,7 +484,7 @@
   $effect(() => {
     void viewTick;
     const held = crop;
-    if (!ready || !map || !held) return;
+    if (!map || !held) return;
     const box = boxOf(map, held.rect);
     untrack(() => onarea?.(box));
   });
@@ -494,14 +502,14 @@
    * adjacent features lands where the player aimed, then a forgiving one so
    * thin lines and small circles stay clickable on a trackpad.
    */
-  function pickAt(point: maplibregl.Point): string | null {
+  function pickAt(instance: maplibregl.Map, point: maplibregl.Point): string | null {
     for (const tolerance of [4, 14]) {
-      const hits = map!.queryRenderedFeatures(
+      const hits = instance.queryRenderedFeatures(
         [
           [point.x - tolerance, point.y - tolerance],
           [point.x + tolerance, point.y + tolerance],
         ],
-        { layers: PICK_LAYERS.filter((id) => map!.getLayer(id)) },
+        { layers: PICK_LAYERS.filter((id) => instance.getLayer(id)) },
       );
       const osmId = firstPickable(hits, spent);
       if (osmId !== null) return osmId;
@@ -592,7 +600,6 @@
       frame(instance);
       canvasSize = sizeOf(instance);
       map = instance;
-      ready = true;
       report(instance);
     });
     instance.on('move', () => {
@@ -610,7 +617,7 @@
     });
 
     return () => {
-      ready = false;
+      map = undefined;
       instance.remove();
     };
   });
@@ -618,13 +625,13 @@
   // The builder swaps in a whole new area as you pan, so the source is updated
   // in place rather than rebuilding the map.
   $effect(() => {
-    if (!ready || !map) return;
+    if (!map) return;
     const source = map.getSource('features') as maplibregl.GeoJSONSource | undefined;
     source?.setData(indexed as GeoJSON.FeatureCollection);
   });
 
   $effect(() => {
-    if (!ready || !map) return;
+    if (!map) return;
     const source = map.getSource('context') as maplibregl.GeoJSONSource | undefined;
     source?.setData(context as GeoJSON.FeatureCollection);
   });
@@ -633,7 +640,7 @@
   // candidates, Seterra-style, rather than hunting blank terrain. The builder
   // draws everything, because what you are excluding is part of the decision.
   $effect(() => {
-    if (!ready || !map) return;
+    if (!map) return;
     const round =
       mode === 'play' && activeIds
         ? (['in', ['get', 'idx'], ['literal', activeIds.flatMap((id) => idxOf.get(id) ?? [])]] as maplibregl.FilterSpecification)
@@ -653,7 +660,7 @@
   });
 
   $effect(() => {
-    if (!ready || !map) return;
+    if (!map) return;
     for (const [id, idx] of idxOf) {
       if (mode === 'build') {
         const inclusion = shade[id] ?? 'auto-out';
@@ -689,12 +696,12 @@
    * of `hoveredId` and it refuses to return a feature that is already spent.
    */
   $effect(() => {
-    if (!ready || !map || !hoveredId) return;
+    if (!map || !hoveredId) return;
     const instance = map;
     const idx = idxOf.get(hoveredId);
     if (idx === undefined) return;
     instance.setFeatureState({ source: 'features', id: idx }, { hover: true });
-    return () => instance.setFeatureState({ source: 'features', id: idx }, { hover: false });
+    return () => map?.setFeatureState({ source: 'features', id: idx }, { hover: false });
   });
 
   /**
@@ -704,7 +711,7 @@
    * blinking one is something you go to.
    */
   $effect(() => {
-    if (!ready || !map || !revealId) return;
+    if (!map || !revealId) return;
     const instance = map;
     const idx = idxOf.get(revealId);
     const target = byId.get(revealId);
@@ -749,7 +756,7 @@
 
     return () => {
       clearInterval(timer);
-      instance.setFeatureState({ source: 'features', id: idx }, { flash: false });
+      map?.setFeatureState({ source: 'features', id: idx }, { flash: false });
       marker.remove();
     };
   });
@@ -772,7 +779,7 @@
    */
   const drawn = $derived.by((): Drawn[] => {
     void viewTick;
-    if (!ready || !map) return [];
+    if (!map) return [];
     const instance = map;
     const canvas = instance.getCanvas();
     const size = { width: canvas.clientWidth, height: canvas.clientHeight };
@@ -878,7 +885,7 @@
    * and reveal labels invisible for as long as the player kept panning.
    */
   $effect(() => {
-    const instance = ready ? map : undefined;
+    const instance = map;
     if (!instance) {
       for (const { marker } of live.values()) marker.remove();
       live.clear();
@@ -935,7 +942,7 @@
   );
 
   $effect(() => {
-    if (!ready || !map) return;
+    if (!map) return;
     const instance = map;
     const markers = pinned.map((feature) => {
       const element = document.createElement('div');
@@ -952,7 +959,7 @@
   });
 
   $effect(() => {
-    if (!ready || !map) return;
+    if (!map) return;
     const instance = map;
 
     /*
@@ -984,7 +991,7 @@
     let twoFinger: { at: maplibregl.Point; time: number } | null = null;
 
     const onClick = (event: maplibregl.MapMouseEvent) => {
-      if (enabled) onpick(pickAt(event.point));
+      if (enabled) onpick(pickAt(instance, event.point));
     };
     const onTouchStart = (event: maplibregl.MapTouchEvent) => {
       twoFinger =
@@ -1002,7 +1009,7 @@
       if (event.originalEvent.timeStamp - tap.time < TWO_FINGER_TAP_MS) zoomBy(tap.at, true);
     };
     const onMove = (event: maplibregl.MapMouseEvent) => {
-      const hit = enabled ? pickAt(event.point) : null;
+      const hit = enabled ? pickAt(instance, event.point) : null;
       instance.getCanvas().style.cursor = hit ? 'pointer' : '';
       hoveredId = hit;
     };
