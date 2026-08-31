@@ -6,7 +6,25 @@ import type {
 
 import { DEM_MAXZOOM, ELEVATION_STOPS, TERRARIUM } from './terrain.ts';
 
-/** A feature nobody has answered yet. */
+/**
+ * A feature nobody has answered yet.
+ *
+ * Violet because nothing else on the map is: the tint runs pale green through
+ * gold and brown to grey rock, water is a desaturated blue, and every colour
+ * that means something — the grade ramp, the miss, the reveal — is green,
+ * amber or red. Measured against all of them, this sits at worst dE 102 from
+ * anything on the basemap and dE 111 from anything the app uses to say
+ * something, while holding 7:1 on its white casing and 5.9:1 on the palest
+ * valley floor. The slate it replaces was only dE 30 from high rock, which is
+ * why an unanswered valley faded into the top of the ramp.
+ *
+ * Blue was the other candidate and lost on meaning rather than numbers: these
+ * features are valleys, drawn along the line a river takes, so a blue one reads
+ * as water.
+ */
+export const UNANSWERED = '#6d28d9';
+
+/** A feature the builder is leaving out. Grey says "not part of this". */
 export const NEUTRAL = '#3f4a5a';
 /** A valley clicked by mistake — "not that one". */
 export const MISS = '#e0921a';
@@ -103,7 +121,7 @@ const playColor: ExpressionSpecification = [
     ['to-number', ['feature-state', 'grade'], 0],
     ...GRADE_STOPS.flat(),
   ],
-  NEUTRAL,
+  UNANSWERED,
 ] as ExpressionSpecification;
 
 /** In the builder, colour says only one thing: is this in the quiz or not. */
