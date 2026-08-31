@@ -19,6 +19,9 @@
     canReveal: boolean;
     onquit: () => void;
     onreveal: () => void;
+    /** Reports how much of the map this bar covers, so the camera can allow
+     * for it. Its height moves with the question's length and the window. */
+    onheight?: (px: number) => void;
   };
 
   let {
@@ -33,14 +36,18 @@
     canReveal,
     onquit,
     onreveal,
+    onheight,
   }: Props = $props();
+
+  let height = $state(0);
+  $effect(() => onheight?.(height));
 
   const tone = $derived(
     feedback?.kind === 'correct' ? 'good' : feedback || revealing ? 'bad' : 'neutral',
   );
 </script>
 
-<div class="prompt" data-tone={tone}>
+<div class="prompt" data-tone={tone} bind:offsetHeight={height}>
   <div class="progress">
     <button class="quit" onclick={onquit} title="Back to areas">← {zoneLabel}</button>
     <span class="pos">{Math.min(index + 1, total)} / {total}</span>

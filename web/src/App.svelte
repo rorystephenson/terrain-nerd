@@ -65,6 +65,8 @@
   let locked = $state(false);
   let collapsed = $state(false);
   let viewState = $state<ViewState>({ view: [0, 0, 0, 0], covers: true });
+  /** Measured, not assumed: the prompt grows with the question and the window. */
+  let promptHeight = $state(0);
   let timers: ReturnType<typeof setTimeout>[] = [];
 
   const clearTimers = () => {
@@ -317,6 +319,7 @@
         {labels}
         {places}
         enabled={!locked && !finished}
+        chromeTop={promptHeight}
         onpick={pick}
         onview={(v) => (viewState = v)}
       />
@@ -335,6 +338,7 @@
         canReveal={Boolean(question) && !revealId && !locked && !finished}
         onquit={toList}
         onreveal={showAnswer}
+        onheight={(px) => (promptHeight = px)}
       />
       {#if finished}
         <Results

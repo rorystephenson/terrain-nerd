@@ -41,6 +41,8 @@
     /** Settlement names drawn as an orientation aid. */
     places?: PlaceFeature[];
     enabled?: boolean;
+    /** Height of the prompt bar drawn over the map, in pixels. */
+    chromeTop?: number;
     onpick: (id: string | null) => void;
     onview?: (view: ViewState) => void;
   };
@@ -59,14 +61,28 @@
     shade = {},
     places = [],
     enabled = true,
+    chromeTop = 0,
     onpick,
     onview,
   }: Props = $props();
 
   /** How fast the revealed feature blinks. */
   const FLASH_MS = 420;
-  /** How far beyond the framed view the player may pan, as a fraction of it. */
-  const PAN_SLACK = 0.15;
+  /**
+   * How much ground past the features the player may see.
+   *
+   * A share of the visible map rather than a fixed count of pixels: 100px is a
+   * tenth of a desktop window but a quarter of a phone's width, and a quarter
+   * of the screen spent on ground outside the quiz is a lot of glass to waste.
+   * The floor is what the other job of the slack needs — a feature on the very
+   * edge of the area has to be draggable clear of the screen edge far enough to
+   * read and to tap, and a fingertip is about 44px whatever the device.
+   */
+  const PAN_SLACK_SHARE = 0.12;
+  const PAN_SLACK_MIN_PX = 48;
+  const PAN_SLACK_MAX_PX = 120;
+  /** Breathing room left around the area when framing it, in screen pixels. */
+  const FRAME_MARGIN_PX = 40;
   /** Below this, naming every candidate would be unreadable anyway. */
   const NAME_FROM_ZOOM = 9.5;
   const MAX_FEATURE_LABELS = 45;
@@ -102,6 +118,43 @@
   const idxOf = $derived(new Map(collection.features.map((feature, idx) => [feature.id, idx])));
   const byId = $derived(new Map(collection.features.map((feature) => [feature.id, feature])));
 
+  /**
+   * What the prompt hides. Map is drawn under it, so it is not ground the
+   * player can see — everything else over the map is a small floating control
+   * with map either side of it.
+   */
+  const chrome = $derived({ top: chromeTop, bottom: 0, left: 0, right: 0 });
+  /** The box the area is framed into when the view opens. */
+  const framePad = $derived({
+    top: chromeTop + FRAME_MARGIN_PX,
+    bottom: FRAME_MARGIN_PX,
+    left: FRAME_MARGIN_PX,
+    right: FRAME_MARGIN_PX,
+  });
+
+  /**
+   * Where the features actually are, which is what the camera is answerable
+   * to. Not the `bbox` prop: a saved quiz stores its extent padded by a
+   * fraction of its own span, and a fraction of a span is a different number
+   * of pixels at every zoom — anchoring to it would put the slack back on the
+   * sliding scale this is meant to have taken it off.
+   */
+  const bounds = $derived.by(() => {
+    let box: [number, number, number, number] | null = null;
+    for (const feature of collection.features) {
+      const at = feature.bbox;
+      box = box
+        ? [
+            Math.min(box[0], at[0]),
+            Math.min(box[1], at[1]),
+            Math.max(box[2], at[2]),
+            Math.max(box[3], at[3]),
+          ]
+        : [at[0], at[1], at[2], at[3]];
+    }
+    return box ?? bbox;
+  });
+
   let container: HTMLDivElement;
   let map: maplibregl.Map | undefined = $state();
   let ready = $state(false);
@@ -115,27 +168,149 @@
       [box[2] + lon, box[3] + lat],
     ] as [[number, number], [number, number]];
 
+  type Inset = { top: number; bottom: number; left: number; right: number };
+
+  /**
+   * The area and a box on screen to judge it against, in the units the camera
+   * works in: mercator (0..1 across the world) for the area, pixels for the
+   * box. Two boxes get used. The leash is judged against `chrome` — what the
+   * player can see — because the rule it enforces is about what reaches their
+   * eyes. The opening view is judged against `framePad`, which adds margins so
+   * the area does not open flush against the edges.
+   */
+  function framing(
+    instance: maplibregl.Map,
+    box: [number, number, number, number],
+    inset: Inset,
+  ) {
+    const nw = maplibregl.MercatorCoordinate.fromLngLat({ lng: box[0], lat: box[3] });
+    const se = maplibregl.MercatorCoordinate.fromLngLat({ lng: box[2], lat: box[1] });
+    const canvas = instance.getCanvas();
+    return {
+      nw,
+      se,
+      inset,
+      width: canvas.clientWidth - inset.left - inset.right,
+      height: canvas.clientHeight - inset.top - inset.bottom,
+      /** Half the canvas — where MapLibre draws whatever centre it is given. */
+      half: { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
+    };
+  }
+
+  type Framing = ReturnType<typeof framing>;
+
+  /** The slack, in pixels, for a given visible map. Measured on its shorter
+   * side, so it reads the same however the window is turned. */
+  const slackFor = (shape: Framing) =>
+    Math.min(
+      Math.max(PAN_SLACK_SHARE * Math.min(shape.width, shape.height), PAN_SLACK_MIN_PX),
+      PAN_SLACK_MAX_PX,
+    );
+
+  /** The zoom at which `mercator` units of world cover `px` pixels. */
+  const zoomFor = (px: number, mercator: number) =>
+    px <= 0 ? -Infinity : Math.log2(px / (mercator * 512));
+
+  /** The zoom that puts the whole area inside the box. */
+  const fitZoom = (shape: Framing) =>
+    Math.min(
+      zoomFor(shape.width, shape.se.x - shape.nw.x),
+      zoomFor(shape.height, shape.se.y - shape.nw.y),
+    );
+
+  /**
+   * The lowest zoom the leash can still be honoured at: below it the box is
+   * wider than the area and its slack put together, so no centre satisfies the
+   * rule and that axis has to be pinned instead.
+   */
+  const leashZoom = (shape: Framing) => {
+    const slack = slackFor(shape);
+    return Math.max(
+      zoomFor(shape.width - 2 * slack, shape.se.x - shape.nw.x),
+      zoomFor(shape.height - 2 * slack, shape.se.y - shape.nw.y),
+    );
+  };
+
+  /** The centre that sits the area in the middle of the box. */
+  function centred(shape: Framing, zoom: number) {
+    const world = 512 * 2 ** zoom;
+    return new maplibregl.MercatorCoordinate(
+      (shape.nw.x + shape.se.x) / 2 - (shape.inset.left - shape.inset.right) / 2 / world,
+      (shape.nw.y + shape.se.y) / 2 - (shape.inset.top - shape.inset.bottom) / 2 / world,
+    ).toLngLat();
+  }
+
+  /**
+   * The leash: how much ground past the features the player may drag into
+   * view. The same amount of it, on every side, at every zoom.
+   *
+   * `maxBounds` cannot express that — it is a fixed span of degrees, so the
+   * slack it leaves is worth more and more pixels the further in you zoom.
+   * Neither can a bbox padded by a fraction of itself, for the same reason.
+   * Only a rule stated in pixels and applied at the requested zoom holds still.
+   *
+   * MapLibre asks this for a verdict on every camera change, before the change
+   * lands, so there is nothing to correct after the fact and inertia is left to
+   * the engine. Below `leashZoom` the two limits cross and the axis pins to the
+   * middle of the range it could not satisfy.
+   */
+  function leash(instance: maplibregl.Map, box: [number, number, number, number]) {
+    return (lngLat: maplibregl.LngLat, zoom: number) => {
+      // Overriding the constrain replaces the zoom clamp too, so redo it here.
+      const held = Math.min(Math.max(zoom, instance.getMinZoom()), instance.getMaxZoom());
+      const shape = framing(instance, box, chrome);
+      const slack = slackFor(shape);
+      const world = 512 * 2 ** held;
+      const at = maplibregl.MercatorCoordinate.fromLngLat(lngLat);
+      // Clamps one axis of the centre. `near` and `far` are its distances, in
+      // pixels, to the two edges of the box on that axis.
+      const hold = (centre: number, lo: number, hi: number, near: number, far: number) => {
+        const min = lo * world - slack + near;
+        const max = hi * world + slack - far;
+        const px = min > max ? (min + max) / 2 : Math.min(Math.max(centre * world, min), max);
+        return px / world;
+      };
+      return {
+        center: new maplibregl.MercatorCoordinate(
+          hold(
+            at.x,
+            shape.nw.x,
+            shape.se.x,
+            shape.half.x - shape.inset.left,
+            shape.half.x - shape.inset.right,
+          ),
+          hold(
+            at.y,
+            shape.nw.y,
+            shape.se.y,
+            shape.half.y - shape.inset.top,
+            shape.half.y - shape.inset.bottom,
+          ),
+        ).toLngLat(),
+        zoom: held,
+      };
+    };
+  }
+
   /**
    * Frames the area and locks the view to it.
    *
-   * The leash is derived from the *fitted viewport*, not from the area's own
-   * bbox. That matters: bounds narrower than the window make MapLibre zoom in
-   * to obey them, so a leash measured off the bbox would either crop the area
-   * or, padded enough to be safe, let the player wander half the province.
-   * Pinning `minZoom` to the framing zoom closes the same hole from the other
-   * side — you cannot zoom out past the area being quizzed.
+   * The zoom floor is the lower of two: the zoom that shows the whole area, and
+   * the one below which the leash stops being satisfiable. Taking the lower
+   * keeps the whole area reachable when its shape does not match the window's —
+   * an area much wider than it is tall cannot fill a squarer window, and the
+   * alternative to relaxing the leash for that last part of the range would be
+   * to crop the quiz and never show it whole.
    */
   function frame(instance: maplibregl.Map) {
     // The previous area's limits would constrain this fit, so clear them first.
     instance.setMaxBounds(null);
+    instance.setTransformConstrain(null);
     instance.setMinZoom(0);
-    instance.fitBounds(pad(bbox, 0.02, 0.02), {
-      padding: { top: 110, bottom: 40, left: 40, right: 40 },
-      duration: 0,
-    });
 
     // Choosing an area means going wherever you like inside the coverage.
     if (mode === 'build') {
+      instance.fitBounds(pad(bbox, 0.02, 0.02), { padding: framePad, duration: 0 });
       if (coverage) {
         instance.setMaxBounds([
           [coverage[0], coverage[1]],
@@ -145,14 +320,13 @@
       return;
     }
 
-    instance.setMinZoom(instance.getZoom());
-    const framed = instance.getBounds();
-    const lon = (framed.getEast() - framed.getWest()) * PAN_SLACK;
-    const lat = (framed.getNorth() - framed.getSouth()) * PAN_SLACK;
-    instance.setMaxBounds([
-      [framed.getWest() - lon, framed.getSouth() - lat],
-      [framed.getEast() + lon, framed.getNorth() + lat],
-    ]);
+    const opening = framing(instance, bounds, framePad);
+    const open = Math.min(Math.max(fitZoom(opening), 0), instance.getMaxZoom());
+    instance.setMinZoom(
+      Math.max(Math.min(open, leashZoom(framing(instance, bounds, chrome))), 0),
+    );
+    instance.setTransformConstrain(leash(instance, bounds));
+    instance.jumpTo({ center: centred(opening, open), zoom: open });
   }
 
   /**
@@ -193,7 +367,11 @@
     ];
     onview?.({
       view: box,
-      covers: box[0] <= bbox[0] && box[1] <= bbox[1] && box[2] >= bbox[2] && box[3] >= bbox[3],
+      covers:
+        box[0] <= bounds[0] &&
+        box[1] <= bounds[1] &&
+        box[2] >= bounds[2] &&
+        box[3] >= bounds[3],
     });
   }
 
@@ -209,7 +387,7 @@
    */
   $effect(() => {
     const initial = untrack(() => ({
-      bounds: pad(bbox, 0.02, 0.02),
+      bounds: pad(mode === 'play' ? bounds : bbox, 0.02, 0.02),
       style: buildStyle(
         context as GeoJSON.FeatureCollection,
         indexed as GeoJSON.FeatureCollection,
@@ -347,7 +525,7 @@
           [box[2], box[3]],
         ],
         {
-          padding: { top: 110, bottom: 48, left: 48, right: 48 },
+          padding: framePad,
           // Never zoom further in than the player already was; they chose that
           // scale and yanking it away is disorienting.
           maxZoom: instance.getZoom(),
