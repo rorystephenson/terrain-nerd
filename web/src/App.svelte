@@ -307,25 +307,6 @@
     {/key}
   {:else if screen.at === 'play'}
     {#if quiz}
-      <MapView
-        {collection}
-        context={context}
-        mode="play"
-        {activeIds}
-        bbox={screen.spec.bbox}
-        {graded}
-        {missId}
-        {revealId}
-        {labels}
-        {places}
-        enabled={!locked && !finished}
-        chromeTop={promptHeight}
-        onpick={pick}
-        onview={(v) => (viewState = v)}
-      />
-      {#if !viewState.covers}
-        <Minimap bbox={screen.spec.bbox} view={viewState.view} {features} />
-      {/if}
       <Prompt
         {question}
         {feedback}
@@ -340,6 +321,30 @@
         onreveal={showAnswer}
         onheight={(px) => (promptHeight = px)}
       />
+      <!-- The map waits on that measurement: how much of the map the prompt
+           covers decides where the map opens, and one built before it is known
+           would have to move — and refetch its tiles — once it arrived. -->
+      {#if promptHeight > 0}
+        <MapView
+          {collection}
+          context={context}
+          mode="play"
+          {activeIds}
+          bbox={screen.spec.bbox}
+          {graded}
+          {missId}
+          {revealId}
+          {labels}
+          {places}
+          enabled={!locked && !finished}
+          chromeTop={promptHeight}
+          onpick={pick}
+          onview={(v) => (viewState = v)}
+        />
+        {#if !viewState.covers}
+          <Minimap bbox={screen.spec.bbox} view={viewState.view} {features} />
+        {/if}
+      {/if}
       {#if finished}
         <Results
           answers={quiz.answers}

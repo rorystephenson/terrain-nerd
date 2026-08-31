@@ -83,6 +83,8 @@
   const PAN_SLACK_MAX_PX = 120;
   /** Breathing room left around the area when framing it, in screen pixels. */
   const FRAME_MARGIN_PX = 40;
+  /** As far in as the terrain data is worth showing. */
+  const MAX_ZOOM = 14;
   /** Below this, naming every candidate would be unreadable anyway. */
   const NAME_FROM_ZOOM = 9.5;
   const MAX_FEATURE_LABELS = 45;
@@ -179,23 +181,28 @@
    * the area does not open flush against the edges.
    */
   function framing(
-    instance: maplibregl.Map,
+    size: { width: number; height: number },
     box: [number, number, number, number],
     inset: Inset,
   ) {
     const nw = maplibregl.MercatorCoordinate.fromLngLat({ lng: box[0], lat: box[3] });
     const se = maplibregl.MercatorCoordinate.fromLngLat({ lng: box[2], lat: box[1] });
-    const canvas = instance.getCanvas();
     return {
       nw,
       se,
       inset,
-      width: canvas.clientWidth - inset.left - inset.right,
-      height: canvas.clientHeight - inset.top - inset.bottom,
+      width: size.width - inset.left - inset.right,
+      height: size.height - inset.top - inset.bottom,
       /** Half the canvas — where MapLibre draws whatever centre it is given. */
-      half: { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
+      half: { x: size.width / 2, y: size.height / 2 },
     };
   }
+
+  /** The canvas an existing map is drawn on, in CSS pixels. */
+  const sizeOf = (instance: maplibregl.Map) => {
+    const canvas = instance.getCanvas();
+    return { width: canvas.clientWidth, height: canvas.clientHeight };
+  };
 
   type Framing = ReturnType<typeof framing>;
 
@@ -258,7 +265,7 @@
     return (lngLat: maplibregl.LngLat, zoom: number) => {
       // Overriding the constrain replaces the zoom clamp too, so redo it here.
       const held = Math.min(Math.max(zoom, instance.getMinZoom()), instance.getMaxZoom());
-      const shape = framing(instance, box, chrome);
+      const shape = framing(sizeOf(instance), box, chrome);
       const slack = slackFor(shape);
       const world = 512 * 2 ** held;
       const at = maplibregl.MercatorCoordinate.fromLngLat(lngLat);
@@ -293,14 +300,35 @@
   }
 
   /**
-   * Frames the area and locks the view to it.
+   * The camera a play view opens on, and the floor it may not zoom out past.
    *
-   * The zoom floor is the lower of two: the zoom that shows the whole area, and
+   * Worked out from a size rather than from a map, so the map can be built
+   * looking at exactly this and never has to be moved afterwards. A map that
+   * opens somewhere else and corrects itself on load does not just jump under
+   * the player — it has already spent a round of tile requests on the view it
+   * was about to abandon.
+   *
+   * The floor is the lower of two zooms: the one that shows the whole area, and
    * the one below which the leash stops being satisfiable. Taking the lower
    * keeps the whole area reachable when its shape does not match the window's —
    * an area much wider than it is tall cannot fill a squarer window, and the
-   * alternative to relaxing the leash for that last part of the range would be
-   * to crop the quiz and never show it whole.
+   * alternative to relaxing the leash for that last stretch would be to crop
+   * the quiz and never show it whole.
+   */
+  function opening(size: { width: number; height: number }, box: [number, number, number, number]) {
+    const shape = framing(size, box, framePad);
+    const zoom = Math.min(Math.max(fitZoom(shape), 0), MAX_ZOOM);
+    return {
+      center: centred(shape, zoom),
+      zoom,
+      minZoom: Math.max(Math.min(zoom, leashZoom(framing(size, box, chrome))), 0),
+    };
+  }
+
+  /**
+   * Frames the area and locks the view to it. On first load this repeats what
+   * the map was built with and changes nothing; on resize it recuts both the
+   * framing and the leash for the new window.
    */
   function frame(instance: maplibregl.Map) {
     // The previous area's limits would constrain this fit, so clear them first.
@@ -320,13 +348,10 @@
       return;
     }
 
-    const opening = framing(instance, bounds, framePad);
-    const open = Math.min(Math.max(fitZoom(opening), 0), instance.getMaxZoom());
-    instance.setMinZoom(
-      Math.max(Math.min(open, leashZoom(framing(instance, bounds, chrome))), 0),
-    );
+    const camera = opening(sizeOf(instance), bounds);
+    instance.setMinZoom(camera.minZoom);
     instance.setTransformConstrain(leash(instance, bounds));
-    instance.jumpTo({ center: centred(opening, open), zoom: open });
+    instance.jumpTo({ center: camera.center, zoom: camera.zoom });
   }
 
   /**
@@ -387,7 +412,13 @@
    */
   $effect(() => {
     const initial = untrack(() => ({
-      bounds: pad(mode === 'play' ? bounds : bbox, 0.02, 0.02),
+      camera:
+        mode === 'play'
+          ? opening(
+              { width: container.clientWidth, height: container.clientHeight },
+              bounds,
+            )
+          : null,
       style: buildStyle(
         context as GeoJSON.FeatureCollection,
         indexed as GeoJSON.FeatureCollection,
@@ -397,12 +428,22 @@
 
     const instance = new maplibregl.Map({
       container,
-      bounds: initial.bounds,
-      maxZoom: 14,
+      // Built looking where it means to stay. The builder has no leash, so it
+      // is framed the same way `frame` frames it, by the same call.
+      ...(initial.camera
+        ? { center: initial.camera.center, zoom: initial.camera.zoom, minZoom: initial.camera.minZoom }
+        : {
+            bounds: pad(bbox, 0.02, 0.02),
+            fitBoundsOptions: { padding: framePad },
+          }),
+      maxZoom: MAX_ZOOM,
       dragRotate: false,
       attributionControl: false,
       style: initial.style,
     });
+
+    // Before the first frame is drawn, so nothing can be shown off the leash.
+    if (mode === 'play') instance.setTransformConstrain(leash(instance, untrack(() => bounds)));
 
     instance.addControl(
       new maplibregl.AttributionControl({
