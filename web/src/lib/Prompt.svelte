@@ -69,12 +69,12 @@
         {/if}
       {:else if feedback?.kind === 'correct'}
         Correct
-      {:else if feedback?.kind === 'miss'}
-        {#if feedback.name}That's <strong>{feedback.name}</strong>.{:else}Nothing there.{/if}
-        Try again — {feedback.triesLeft}
-        {feedback.triesLeft === 1 ? 'try' : 'tries'} left
       {:else if question}
-        Find <strong>{question.name}</strong>
+        <!-- The question stays put while it is being answered: a wrong click
+             only spends a try, and the count is the one thing that moves. The
+             feature that was hit is named on the map itself. -->
+        Find <strong>{question.name}</strong> — {triesLeft}
+        {triesLeft === 1 ? 'try' : 'tries'} left
       {/if}
     </p>
     <button class="show" onclick={onreveal} disabled={!canReveal}>Don't know</button>
