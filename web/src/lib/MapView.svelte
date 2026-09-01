@@ -2,7 +2,8 @@
   import { untrack } from 'svelte';
   import maplibregl from 'maplibre-gl';
   import AreaSelect from './AreaSelect.svelte';
-  import { labelReachesScreen, layoutLabels } from './labels.ts';
+  import { labelReachesScreen, scaleForRank } from './labels.ts';
+  import { opacityAtZoom, visibleAtZoom } from './places.ts';
   import {
     clampRect,
     defaultRect,
@@ -111,18 +112,14 @@
   /** Below this, naming every candidate would be unreadable anyway. */
   const NAME_FROM_ZOOM = 9.5;
   /**
-   * A ceiling, not a quota. Which names appear should follow zoom and available
-   * space; a tight cap would make it follow the viewport instead, so that
-   * panning a busier area into view silently evicted labels elsewhere.
+   * A ceiling on markers, not a quota on names.
+   *
+   * How many names a screen holds is settled by the offline thinning, which
+   * spaced them so that a screenful is bounded by construction — this only
+   * exists so a pool built without that thinning cannot flood the DOM. It should
+   * never be what decides.
    */
-  const MAX_PLACE_LABELS = 140;
-  /**
-   * How far off screen place names still compete, in pixels. Comfortably wider
-   * than the longest of them, so one sliding into view cannot displace a name
-   * already drawn. Only the place names are thinned; the builder's own labels
-   * are all drawn (see `drawn`).
-   */
-  const LABEL_PAD = 320;
+  const MAX_PLACE_LABELS = 400;
   /** How long two fingers may rest before their lift stops being a tap. */
   const TWO_FINGER_TAP_MS = 500;
   /** How far a two-finger tap may travel and still be a tap. MapLibre's own. */
@@ -542,6 +539,11 @@
         box[1] <= bounds[1] &&
         box[2] >= bounds[2] &&
         box[3] >= bounds[3],
+      // Reported rather than derived from the box: how much detail a place name
+      // layer shows follows the scale directly, and a bbox in degrees is worth a
+      // different zoom at every latitude and every window shape.
+      zoom: instance.getZoom(),
+      canvas: sizeOf(instance),
     });
   }
 
@@ -790,6 +792,8 @@
     className: string;
     /** Ink for the label's text, where the class does not already fix it. */
     color?: string;
+    /** Below 1 while a place name is fading in, or handing over to finer ones. */
+    opacity?: number;
   };
 
   /**
@@ -867,26 +871,35 @@
       }
     }
 
-    if (places.length > 0) {
-      const candidates = places.map((place) => ({
-        priority: 100 - place.properties.rank,
-        text: place.properties.name,
-        item: place,
+    /*
+     * Place names, by two independent per-label tests and nothing else.
+     *
+     * Which names may be drawn at this scale was decided offline, over the whole
+     * country at once, in `pipeline/src/placeZoom.ts` — so it is already known
+     * that none of them overlap. There is nothing to sort, nothing to evict and
+     * no order for a result to depend on, which is the point: panning can now
+     * only change which names reach the screen, never the verdict on one that
+     * has not moved. The greedy that used to live here was recomputed against
+     * the viewport on every frame, and that is what made names churn.
+     */
+    const zoom = instance.getZoom();
+    let placeCount = 0;
+    for (const place of places) {
+      if (placeCount >= MAX_PLACE_LABELS) break;
+      if (!visibleAtZoom(place, zoom)) continue;
+      const rank = place.properties.rank;
+      const anchor = project(place.geometry.coordinates);
+      if (!labelReachesScreen(anchor, place.properties.name, size, scaleForRank(rank))) continue;
+
+      placeCount++;
+      out.push({
         // Settlements are points, so name plus position is a sound identity.
-        key: `${place.properties.name}@${place.geometry.coordinates.join(',')}`,
-      }));
-      for (const placed of layoutLabels(
-        candidates,
-        (place) => project(place.geometry.coordinates),
-        { ...size, pad: LABEL_PAD, max: MAX_PLACE_LABELS },
-      )) {
-        out.push({
-          key: `p:${placed.text}@${placed.item.geometry.coordinates.join()}`,
-          text: placed.text,
-          at: placed.item.geometry.coordinates,
-          className: `map-place map-place--r${placed.item.properties.rank}`,
-        });
-      }
+        key: `p:${place.properties.name}@${place.geometry.coordinates.join()}`,
+        text: place.properties.name,
+        at: place.geometry.coordinates,
+        className: `map-place map-place--r${rank}`,
+        opacity: opacityAtZoom(place, zoom),
+      });
     }
 
     return out;
@@ -929,7 +942,12 @@
         element.textContent = label.text;
         // Answered names are set in their grade colour rather than plated in it.
         if (label.color) element.style.color = label.color;
+        // Through the marker, never `element.style.opacity`. MapLibre owns that
+        // property on the element it was handed — it rewrites it on every move
+        // to fade markers the terrain has hidden — so an inline value set here
+        // is silently overwritten within a frame, and the fade never appears.
         const marker = new maplibregl.Marker({ element, anchor: 'bottom' })
+          .setOpacity(label.opacity ?? 1)
           .setLngLat(label.at)
           .addTo(instance);
         live.set(key, { marker, label });
@@ -949,6 +967,11 @@
         element.classList.add(...label.className.split(' '));
       }
       if (label.color !== entry.label.color) element.style.color = label.color ?? '';
+      // Only the handful of names within a fade of an edge change this, and only
+      // while the zoom is moving; opacity is compositor-only, so it costs no
+      // layout. Written here rather than as a CSS animation because the keyframe
+      // restarts on any class change and would fight the inline value.
+      if (label.opacity !== entry.label.opacity) entry.marker.setOpacity(label.opacity ?? 1);
       if (label.at[0] !== entry.label.at[0] || label.at[1] !== entry.label.at[1]) {
         entry.marker.setLngLat(label.at);
       }

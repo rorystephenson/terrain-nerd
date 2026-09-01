@@ -29,7 +29,18 @@ export type PlaceFeature = {
   type: 'Feature';
   bbox: [number, number, number, number];
   geometry: { type: 'Point'; coordinates: [number, number] };
-  properties: { name: string; rank: number };
+  properties: {
+    name: string;
+    /** 1..4, city to hamlet. Sizes and weights the label. */
+    rank: number;
+    /**
+     * The zooms this name may be drawn over, decided offline in
+     * `pipeline/src/placeZoom.ts`. Absent on pools built before that existed;
+     * an absent `maxzoom` means the name never hands over.
+     */
+    minzoom?: number;
+    maxzoom?: number;
+  };
 };
 
 /** Basemap furniture: never a quiz answer, never named on the map. */
@@ -71,7 +82,16 @@ export type PoolIndex = {
   area: [number, number, number, number];
   cellSize: number;
   kinds: KindInfo[];
-  places: { count: number; ranks: string[]; cells: Record<string, number> };
+  places: {
+    count: number;
+    ranks: string[];
+    cells: Record<string, number>;
+    /** Absent on a pool built before names carried their own zoom range. */
+    thinned?: boolean;
+    zoomRange?: [number, number];
+    /** The label box the thinning measured with, so a mismatch is at least visible. */
+    labelBox?: { charWidth: number; padding: number; height: number; gap: number };
+  };
   context: { count: number; cells: Record<string, number> };
   water: { count: number; cells: Record<string, number> };
 };
@@ -107,6 +127,17 @@ export type ViewState = {
   view: [number, number, number, number];
   /** True when the whole area is on screen, so the minimap can hide itself. */
   covers: boolean;
+  /**
+   * What the map is actually at, rather than what the bbox implies.
+   *
+   * Place detail follows this directly. Deriving it from the bbox instead made
+   * it a function of window shape and of latitude — a portrait window shows a
+   * different number of degrees of latitude at the same zoom in Sicily and in
+   * the Alps — so panning north could change how much detail you got.
+   */
+  zoom: number;
+  /** Canvas size in CSS pixels, so a fetch pad can be stated in pixels. */
+  canvas: { width: number; height: number };
 };
 
 /**

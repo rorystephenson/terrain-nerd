@@ -25,6 +25,14 @@ import { cellsCovering } from './grid.ts';
 import { scorePool } from './importance.ts';
 import { normalize, type QuizFeature } from './normalize.ts';
 import { OUT_DIR } from './paths.ts';
+import {
+  assignZoomRanges,
+  LABEL_BOX,
+  MAX_LABEL_ZOOM,
+  MIN_LABEL_ZOOM,
+  parsePopulation,
+  type PlaceInput,
+} from './placeZoom.ts';
 import { readLayer, type RawElement, type RawGeometry } from './source.ts';
 import { simplify } from './simplify.ts';
 
@@ -127,9 +135,19 @@ async function writeChunks(
   return counts;
 }
 
+/** Compact "z10:4 z11:57 z12:903" tally, so a re-run shows the thinning at a glance. */
+function histogram(values: number[]): string {
+  const counts = new Map<number, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([zoom, count]) => `z${zoom}:${count.toLocaleString()}`)
+    .join(' ');
+}
+
 async function buildTerrain() {
   const byKind = new Map<KindId, RawElement[]>();
-  const places: { name: string; rank: number; at: LonLat }[] = [];
+  const places: PlaceInput[] = [];
   const flying: LonLat[] = [];
   let seen = 0;
 
@@ -148,7 +166,15 @@ async function buildTerrain() {
     }
     const rank = placeRankOf(element.tags);
     const name = element.tags.name?.trim();
-    if (rank > 0 && name) places.push({ name, rank, at: element.coords[0] });
+    if (rank > 0 && name) {
+      places.push({
+        key: element.id,
+        name,
+        rank,
+        population: parsePopulation(element.tags.population),
+        at: element.coords[0],
+      });
+    }
   }
   console.log(`  read ${seen.toLocaleString()} elements`);
 
@@ -181,18 +207,39 @@ async function buildTerrain() {
     console.log(`  ${kind.label}: ${mine.length.toLocaleString()} across ${Object.keys(cells).length} cells`);
   }
 
+  // Which names may be drawn at which zooms, decided once for the whole country
+  // so the browser never has to decide it from a viewport. See `placeZoom.ts`.
+  const zooms = assignZoomRanges(places);
   const placeFeatures = places.map((place) => ({
     type: 'Feature' as const,
     bbox: [place.at[0], place.at[1], place.at[0], place.at[1]] as BBox,
     geometry: { type: 'Point' as const, coordinates: place.at },
-    properties: { name: place.name, rank: place.rank },
+    properties: {
+      name: place.name,
+      // Still shipped: it is what the renderer sizes and weights a name by.
+      rank: place.rank,
+      minzoom: zooms.min.get(place.key) ?? MAX_LABEL_ZOOM,
+      // Omitted for the majority, which never hand over. Absent means forever.
+      ...(zooms.max.has(place.key) ? { maxzoom: zooms.max.get(place.key) } : {}),
+    },
   }));
   const placeCells = await writeChunks('places', bucketByCell(placeFeatures));
   console.log(`  Places: ${placeFeatures.length.toLocaleString()} across ${Object.keys(placeCells).length} cells`);
+  console.log(`    first drawn at zoom: ${histogram(placeFeatures.map((p) => p.properties.minzoom))}`);
+  console.log(`    hand over to finer names: ${zooms.max.size.toLocaleString()}`);
 
   return {
     kinds,
-    places: { count: placeFeatures.length, ranks: [...PLACE_RANKS], cells: placeCells },
+    places: {
+      count: placeFeatures.length,
+      ranks: [...PLACE_RANKS],
+      cells: placeCells,
+      // Lets the app tell thinned data from a pool built before this existed,
+      // and makes a label-model mismatch visible rather than silent.
+      thinned: true,
+      zoomRange: [MIN_LABEL_ZOOM, MAX_LABEL_ZOOM],
+      labelBox: LABEL_BOX,
+    },
   };
 }
 
@@ -427,15 +474,16 @@ async function buildContext() {
 }
 
 /**
- * The water chunks already written on a previous run.
+ * The chunks a layer already has on disk from a previous run.
  *
- * Rebuilding them means re-reading 178 MB of river geometry for output that
- * almost never changes, so the counts are read back off disk instead. That
- * keeps `index.json` honest about what is actually there.
+ * Rebuilding water means re-reading 178 MB of river geometry, and context 296 MB
+ * of roads, for output that almost never changes — so when a run is only about
+ * the terrain layer the counts are read back off disk instead. That keeps
+ * `index.json` honest about what is actually there.
  */
-function readExistingWater(): { count: number; cells: Record<string, number> } {
+function readExisting(dir_: string): { count: number; cells: Record<string, number> } {
   try {
-    const dir = join(OUT_DIR, 'water');
+    const dir = join(OUT_DIR, dir_);
     const cells: Record<string, number> = {};
     let count = 0;
     for (const file of readdirSync(dir)) {
@@ -454,14 +502,19 @@ function readExistingWater(): { count: number; cells: Record<string, number> } {
 
 async function main() {
   const { values } = parseArgs({
-    options: { 'skip-water': { type: 'boolean', default: false } },
+    options: {
+      'skip-water': { type: 'boolean', default: false },
+      'skip-context': { type: 'boolean', default: false },
+    },
   });
 
   console.log('Processing extracted pool:');
   const terrain = await buildTerrain();
-  const context = await buildContext();
+  // Roads and glaciers change even less often than the terrain does, and tuning
+  // how place names are thinned means re-running this repeatedly.
+  const context = values['skip-context'] ? readExisting('context') : await buildContext();
   // Water is the slowest layer by far; `--skip-water` reuses what is on disk.
-  const water = values['skip-water'] ? readExistingWater() : await buildWater();
+  const water = values['skip-water'] ? readExisting('water') : await buildWater();
 
   await writeJson('index.json', {
     generatedAt: new Date().toISOString().slice(0, 10),

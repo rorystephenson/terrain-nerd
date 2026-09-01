@@ -202,6 +202,10 @@ body {
   white-space: nowrap;
   color: #2b3138;
   pointer-events: none;
+  /* Opacity is written per frame while the zoom crosses a name's threshold, so
+     it fades in rather than popping. Not a keyframe: the animation restarts on
+     any class change and would fight the inline value. */
+  will-change: opacity;
   paint-order: stroke fill;
   -webkit-text-stroke: 3px rgba(255, 255, 255, 0.92);
   text-shadow:

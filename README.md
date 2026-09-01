@@ -111,9 +111,11 @@ settlements only — never the features being quizzed — and they are the only
 names the map is allowed to show, which is why they are not optional. A quiz you
 cannot find your way around is not a harder quiz, just a worse one.
 
-The builder and the player share one rule for this, in `places.ts`. Detail
-follows the *span* being looked at and nothing else, so panning at a fixed zoom
-never changes which names are eligible — only which of them are on screen.
+Every settlement carries the zooms it may be named at, worked out once for the
+whole country before the browser ever sees it, so the builder and the player
+both do the same thing with it: draw the name if the map's zoom is inside its
+range. Panning cannot change that answer, because nothing in it looks at where
+the viewport sits.
 
 ## Running it
 
@@ -151,13 +153,16 @@ curl -L -C - -o pipeline/cache/osm/italy-latest.osm.pbf \
 npm run extract:data          # ~15s per layer, needs: brew install osmium-tool
 
 # 2. Turn the extract into what the browser loads.
-npm run build:data                 # ~2 min
-npm run build:data -- --skip-water # reuse the water chunks already on disk
+npm run build:data                                  # ~2 min
+npm run build:data -- --skip-water                  # reuse the water chunks on disk
+npm run build:data -- --skip-water --skip-context   # terrain only, ~3s
 ```
 
-Water is by far the slowest layer — 178 MB of river geometry — and changes
-rarely, so `--skip-water` reads the existing chunks' counts back instead of
-regenerating them.
+Water is by far the slowest layer — 178 MB of river geometry — and context is
+296 MB of roads; both change rarely, so `--skip-water` and `--skip-context` read
+the existing chunks' counts back instead of regenerating them. Both skips
+together leave just the terrain layer, which is what tuning how place names are
+thinned re-runs, so that loop is seconds rather than minutes.
 
 `extract:data` writes only to `pipeline/cache/osm/`; `build:data` reads only from
 it. The one network call in step 2 is Wikidata sitelink counts, which are cached
@@ -232,9 +237,9 @@ No API key, no tile bill, and nothing arrives pre-labelled.
 topo tiles print valley and peak names straight into the raster, which would
 hand the player every answer. Place names, where a quiz asks for them, are HTML
 markers instead — which also means no glyph endpoint and therefore no API key.
-Because HTML markers do not collide-avoid the way symbol layers do, labels are
-thinned by a greedy screen-space pass before being drawn. Contours are drawn
-unlabelled for the same reason.
+Because HTML markers do not collide-avoid the way symbol layers do, the thinning
+that a symbol layer would have done for free is done in the pipeline, once, for
+the whole country. Contours are drawn unlabelled for the same reason.
 
 ### The elevation palette is measured, not designed
 
@@ -264,19 +269,65 @@ middle of Garda.
 
 ### Which place names get drawn
 
-Zoom picks how much detail is worth showing — cities only when you are looking
-at half a country, hamlets when you are in one valley — and a greedy pass then
-drops any label whose box touches one already placed, strongest first, because
-HTML markers do not collide-avoid the way symbol layers do.
+**The choice is made offline, in `placeZoom.ts`, and the browser only reads the
+answer.** Every settlement ships a `minzoom` — and, for the few that hand over,
+a `maxzoom` — and drawing a name is then `minzoom <= zoom < maxzoom` plus "does
+any of the text reach the screen". Two independent tests per label. Nothing to
+sort, nothing to evict, no order for the result to depend on.
 
-The subtlety is that **the choice must not depend on where the viewport sits**.
-Two things make that true. Labels beyond the screen edge still take part in
-collisions (`pad`), so sliding one into view cannot evict the neighbour it
-should have been blocking all along; and ties are broken by a stable key rather
-than by arrival order, which otherwise varies with whichever data chunk loaded
-first. The ceiling on label count is a safety net, set high enough that it is
-never what decides. At a fixed zoom, panning then only adds and removes labels
-at the edges.
+It used to be a greedy screen-space pass, run on every frame over whatever the
+viewport had loaded, and it churned. A global greedy cascades: one candidate
+arriving at the edge of the fetched box can evict a name in the middle of the
+screen, and every zoom change moves all the pixel distances together and
+reshuffles whole clusters. There is no `pad` that fixes that — a wider pad only
+moves the boundary the churn happens at. It has to stop being a decision the
+viewport can participate in, which is what the whole vector-tile world does:
+tippecanoe's label grid, OpenMapTiles' `rank`.
+
+So the pass runs over all of Italy at once, in **world pixels** rather than
+degrees, admitting names strongest first — tier, then population, then OSM id so
+the answer is reproducible — and recording the first zoom each one fits at. It
+measures the same box `labels.ts` draws with, including the per-rank font sizes,
+because one flat character width under-measured city names by a quarter.
+
+The whole thing rests on one property: world coordinates double per zoom while
+label boxes do not. So a set that clears itself at one zoom clears itself at
+every zoom above it, on both axes, exactly — which is why an integer-zoom
+decision is safe to use at 11.7, and why nothing has to be recomputed as the map
+moves. Names fade in over a quarter of a zoom rather than popping, and the fade
+goes *inward* from each end of the range: drawn any earlier, a name would sit
+closer to its neighbour than the pass ever validated.
+
+**Coarse names hand over.** Zoom far enough into Trento and "Trento" gives way to
+Sardagna, Povo and Vela — the ground has outgrown the name, and the word is left
+sitting on one arbitrary street. It takes both halves of having gone past it:
+the map has to be drawing the city's own ground wider than a screen, *and* three
+finer names inside that ground must already be drawn with the nearest of them
+close to where the old one was. Either half alone gets it wrong. On the count
+alone Trento loses its name at z12, with twenty kilometres still on screen; on
+the scale alone, empty country goes unnamed. Ninety-one names across Italy hand
+over, nearly all of them cities and towns — a village's ground is a few hundred
+metres, which the map is never inside.
+
+The cost, stated plainly: dead-centre on a handed-over city at the deepest zoom,
+a phone can end up with no name on screen at all — 25 of the 91, against 11 on a
+laptop. `HANDOVER_PX` is the dial, and zero retirements is `TAKEOVER` set past
+any real count.
+
+Because the answer is per-label, **there is nothing to settle before fetching.**
+The names refresh on every view change, straight through: what it costs is a
+filter over cells already in memory, about two milliseconds at the widest view
+and a fraction of one at a valley. There was a 250 ms debounce there while the
+collision pass still existed, because a batch landing late could reshuffle names
+already on screen — and it was, on measurement, the entire pause you saw after a
+pan. A late batch can only add now, so it went.
+
+The fetch box is stated in pixels, and asks for the view plus about half a
+label's reach. An unmeasured canvas gets no pad rather than a guessed one:
+treating a canvas of zero as one pixel makes the pad four hundred times the
+view, which touches every cell in the country — that is how opening the builder
+briefly came to download the whole settlement pool, twelve megabytes of it,
+before drawing a single name.
 
 ### Shading is two passes
 
@@ -311,15 +362,16 @@ pipeline/          run on demand, never at build time
   source.ts        streams the extract, source-agnostic RawElement
   normalize.ts     merge same-named segments by proximity
   importance.ts    popularity scoring + Wikidata sitelinks
-  spatial.ts       grid index for nearest-higher-peak
+  spatial.ts       grid index: nearest higher peak, radius queries
+  placeZoom.ts     which zooms each settlement is named at
   simplify.ts      Douglas-Peucker
   grid.ts          the chunk grid
 web/src/lib/
   terrain.ts       elevation palette and DEM source     (pure)
   builder.ts       inclusion rules, pins, resolution   (pure)
-  places.ts        how much settlement detail per zoom  (pure)
+  places.ts        reading a name's zoom range          (pure)
   quiz.ts          quiz state machine                  (pure)
-  labels.ts        greedy label collision              (pure)
+  labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid       (pure)
   chunks.ts        cell loading and caching
   storage.ts       localStorage

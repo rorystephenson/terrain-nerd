@@ -14,7 +14,7 @@
     setRange,
     toggleOverride,
   } from './builder.ts';
-  import { levelFor, PLACE_PAD } from './places.ts';
+  import { placeFetchBox } from './places.ts';
   import { newQuizId } from './storage.ts';
   import type {
     BuilderState,
@@ -63,6 +63,15 @@
   const home = untrack(() => (editing ? padBox(editing.bbox, 0.02) : HOME));
   /** Where the map is now, reported by MapView. Output only. */
   let view = $state<[number, number, number, number]>(home);
+  /**
+   * What the map has measured of itself: null until it has reported once.
+   *
+   * Nullable rather than seeded with zeros, because there is no honest zero
+   * here. `view` has one — `home`, which is a real place to look at before the
+   * map speaks — but a zoom of 0 and a canvas of no size are not small values,
+   * they are absent ones, and code downstream divides by them.
+   */
+  let measured = $state<{ zoom: number; canvas: { width: number; height: number } } | null>(null);
   let area = $state<[number, number, number, number] | null>(null);
   /**
    * What the crop frame currently covers, which is not yet what the pool is
@@ -250,33 +259,34 @@
   });
 
   /**
-   * How much settlement detail is worth showing at this scale.
-   *
-   * Villages across half a country is noise; cities alone in one valley tells
-   * you nothing. Scale the granularity to the span being looked at.
-   */
-  /**
    * Place names, always on and always following the map.
    *
    * You cannot pick the valley you fly if you cannot tell which one it is, and
    * that is no less true once you are choosing features than while framing the
    * area — so both steps use the one rule in `places.ts`.
+   *
+   * Runs on every view change, with no settling delay. There used to be one,
+   * because a batch landing late could make the old collision pass reshuffle
+   * names that were already drawn — but selection is a per-label test now, so a
+   * late arrival can only add. What is left is a filter over cells already
+   * held: about two milliseconds at the widest view, a fraction of one at a
+   * valley. Waiting a quarter of a second for that was a hundred times the
+   * price of doing it, and it was the whole of the pause after a pan.
    */
   $effect(() => {
-    const box = padBox(view, PLACE_PAD);
-    const level = levelFor(view);
+    // Nothing until the map has reported itself: both the pad and the zoom cut
+    // are read off what it says.
+    if (!measured) return;
+    const box = placeFetchBox(view, measured.canvas);
+    const at = measured.zoom;
 
-    // Panning fires continuously, so settle before fetching.
     let cancelled = false;
-    const timer = setTimeout(() => {
-      loadPlaces(index, box, level).then((loaded) => {
-        if (!cancelled) places = loaded;
-      });
-    }, 250);
+    loadPlaces(index, box, at).then((loaded) => {
+      if (!cancelled) places = loaded;
+    });
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
   });
 
@@ -344,7 +354,10 @@
   selected={area}
   {selectInset}
   onpick={pick}
-  onview={(v) => (view = v.view)}
+  onview={(v) => {
+    view = v.view;
+    measured = { zoom: v.zoom, canvas: v.canvas };
+  }}
   onarea={(box) => (pending = box)}
 />
 

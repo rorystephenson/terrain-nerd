@@ -20,6 +20,14 @@ export type GridIndex<T> = {
    * next ring could possibly hold is further than the best already found.
    */
   nearest: (from: LonLat, accept: (item: T) => boolean, capKm: number) => number;
+  /**
+   * Every accepted item within `km`, in bucket order.
+   *
+   * Unlike `nearest` this cannot stop early — a radius query has to visit every
+   * bucket the circle touches — so it walks a square of cells and rejects on
+   * the real distance.
+   */
+  within: (from: LonLat, km: number, accept: (item: T) => boolean) => T[];
 };
 
 export function buildIndex<T>(
@@ -70,6 +78,25 @@ export function buildIndex<T>(
         }
       }
       return best;
+    },
+
+    within(from, km, accept) {
+      const cx = Math.floor(from[0] / cellDeg);
+      const cy = Math.floor(from[1] / cellDeg);
+      // `cellKm` is the narrowest a cell gets anywhere in the set, so this can
+      // only ever overshoot — which costs a distance test, not a missed hit.
+      const reach = Math.ceil(km / cellKm) + 1;
+      const out: T[] = [];
+
+      for (let dx = -reach; dx <= reach; dx++) {
+        for (let dy = -reach; dy <= reach; dy++) {
+          for (const item of buckets.get(`${cx + dx}:${cy + dy}`) ?? []) {
+            if (!accept(item)) continue;
+            if (haversineKm(from, at(item)) <= km) out.push(item);
+          }
+        }
+      }
+      return out;
     },
   };
 }

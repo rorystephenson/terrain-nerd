@@ -7,8 +7,7 @@
   import QuizList from './lib/QuizList.svelte';
   import Results from './lib/Results.svelte';
   import { loadByIds, loadContext, loadIndex, loadPlaces } from './lib/chunks.ts';
-  import { padBox } from './lib/builder.ts';
-  import { levelFor, PLACE_PAD } from './lib/places.ts';
+  import { placeFetchBox } from './lib/places.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
   import {
     deleteQuiz as removeQuiz,
@@ -67,7 +66,12 @@
   let collapsed = $state(false);
   /** The back button is waiting on an answer before it throws the round away. */
   let confirmingQuit = $state(false);
-  let viewState = $state<ViewState>({ view: [0, 0, 0, 0], covers: true });
+  let viewState = $state<ViewState>({
+    view: [0, 0, 0, 0],
+    covers: true,
+    zoom: 0,
+    canvas: { width: 0, height: 0 },
+  });
   /** Measured, not assumed: the prompt grows with the question and the window. */
   let promptHeight = $state(0);
   let timers: ReturnType<typeof setTimeout>[] = [];
@@ -129,13 +133,18 @@
   $effect(() => {
     if (screen.at !== 'play' || !index) return;
     const pool = index;
-    const box = viewState.view;
-    if (box[2] - box[0] <= 0) return; // before the map has reported a view
+    const { view: box, zoom, canvas } = viewState;
+    // Before the map has reported. One test covers the zoom and the canvas too,
+    // since `report` sets the whole of `ViewState` in one go.
+    if (box[2] - box[0] <= 0) return;
 
+    // Straight through on every view change, as the builder does. The cells are
+    // already held, so this is a filter costing a millisecond or two.
     let cancelled = false;
-    loadPlaces(pool, padBox(box, PLACE_PAD), levelFor(box)).then((named) => {
+    loadPlaces(pool, placeFetchBox(box, canvas), zoom).then((named) => {
       if (!cancelled) places = named;
     });
+
     return () => {
       cancelled = true;
     };

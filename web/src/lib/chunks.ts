@@ -7,6 +7,7 @@
  * cache them for the session.
  */
 import { boxesOverlap, cellsCovering, geometryIntersectsBox, pointInBox } from './grid.ts';
+import { visibleAtZoom } from './places.ts';
 import type {
   ContextCollection,
   KindId,
@@ -29,7 +30,14 @@ export async function loadIndex(): Promise<PoolIndex> {
       `Could not load the feature pool (${response.status}). Run: npm run extract:data && npm run build:data`,
     );
   }
-  return (await response.json()) as PoolIndex;
+  const index = (await response.json()) as PoolIndex;
+  if (!index.places.thinned) {
+    console.warn(
+      'Place names in this pool carry no zoom range, so they are drawn by rank alone ' +
+        'and will overlap when zoomed in. Re-run: npm run build:data -- --skip-water --skip-context',
+    );
+  }
+  return index;
 }
 
 async function loadCell(dir: string, cell: string): Promise<unknown[]> {
@@ -123,12 +131,18 @@ export async function loadByIds(
   return ids.flatMap((id) => byId.get(id) ?? []);
 }
 
+/**
+ * The settlements worth drawing over this ground at this zoom.
+ *
+ * The zoom cut is a property of each name, decided offline — see `places.ts` —
+ * so which names come back depends on the scale and the ground, never on where
+ * the viewport happens to sit within that ground.
+ */
 export async function loadPlaces(
   index: PoolIndex,
   bbox: [number, number, number, number],
-  maxRank: number,
+  zoom: number,
 ): Promise<PlaceFeature[]> {
-  if (maxRank <= 0) return [];
   const batches = await Promise.all(
     cellsCovering(bbox, index.cellSize)
       .filter((cell) => index.places.cells[cell])
@@ -139,7 +153,7 @@ export async function loadPlaces(
   const out: PlaceFeature[] = [];
   for (const batch of batches) {
     for (const place of batch) {
-      if (place.properties.rank > maxRank) continue;
+      if (!visibleAtZoom(place, zoom)) continue;
       if (!pointInBox(place.geometry.coordinates, bbox)) continue;
       // Settlements are points, so name plus position is a sound identity.
       const key = `${place.properties.name}@${place.geometry.coordinates.join(',')}`;
