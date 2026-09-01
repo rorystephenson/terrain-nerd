@@ -23,6 +23,25 @@ const GRID_FROM_ZOOM = 6;
 
 const selected = new Set<string>();
 
+/**
+ * Where people actually fly, from thermal.kk7.ch — the whole reason this tool
+ * can be used to judge anything. Skyways are the routes XC flights trace out;
+ * thermals are where they climb. A valley with neither is a valley nobody will
+ * be quizzed on, whatever it looks like on a relief map.
+ *
+ * Served TMS rather than XYZ, so the row is counted from the south and MapLibre
+ * needs telling. Getting that wrong does not fail loudly — it quietly returns a
+ * 1x1 placeholder for every tile, so the layer just looks empty.
+ *
+ * CC BY-NC-SA 4.0, and `src` is required on every request.
+ */
+const KK7 = { skyways: { layer: 'skyways_all_all', maxzoom: 13 },
+              thermals: { layer: 'thermals_all_all', maxzoom: 12 } } as const;
+type Overlay = keyof typeof KK7;
+
+const kk7Url = (layer: string) =>
+  `https://thermal.kk7.ch/tiles/${layer}/{z}/{x}/{y}.png?src=${location.hostname || 'localhost'}`;
+
 const map = new maplibregl.Map({
   container: 'map',
   style: 'https://tiles.openfreemap.org/styles/positron',
@@ -87,23 +106,62 @@ map.on('load', () => {
   map.addSource('grid', { type: 'geojson', data: collection([]) });
   map.addSource('picked', { type: 'geojson', data: collection([]) });
 
+  for (const [name, { layer, maxzoom }] of Object.entries(KK7) as [Overlay, typeof KK7[Overlay]][]) {
+    map.addSource(name, {
+      type: 'raster',
+      tiles: [kk7Url(layer)],
+      tileSize: 256,
+      scheme: 'tms',
+      // Beyond this they have no data; without it MapLibre asks anyway and gets
+      // placeholders, so the overlay vanishes exactly when you zoom in to look.
+      maxzoom,
+      attribution:
+        '<a href="https://thermal.kk7.ch/">thermal.kk7.ch</a> CC BY-NC-SA 4.0',
+    });
+    map.addLayer({
+      id: name,
+      type: 'raster',
+      source: name,
+      layout: { visibility: 'none' },
+      paint: { 'raster-opacity': 0.75 },
+    });
+  }
+
+  /*
+   * Everything below is drawn twice, dark under light. The skyways overlay runs
+   * the whole way from near-black to saturated red, so a single-colour line is
+   * invisible against some part of it — and a grid you cannot see is a grid you
+   * cannot pick cells off, which is the entire job.
+   */
+  map.addLayer({
+    id: 'grid-casing',
+    type: 'line',
+    source: 'grid',
+    paint: { 'line-color': '#11151a', 'line-width': 2.2, 'line-opacity': 0.3 },
+  });
   map.addLayer({
     id: 'grid-line',
     type: 'line',
     source: 'grid',
-    paint: { 'line-color': '#7b8695', 'line-width': 0.6, 'line-opacity': 0.5 },
+    paint: { 'line-color': '#ffffff', 'line-width': 0.8, 'line-opacity': 0.75 },
   });
   map.addLayer({
     id: 'picked-fill',
     type: 'fill',
     source: 'picked',
-    paint: { 'fill-color': '#1f6f4a', 'fill-opacity': 0.28 },
+    paint: { 'fill-color': '#19c37d', 'fill-opacity': 0.22 },
+  });
+  map.addLayer({
+    id: 'picked-casing',
+    type: 'line',
+    source: 'picked',
+    paint: { 'line-color': '#0b3d28', 'line-width': 4.5, 'line-opacity': 0.55 },
   });
   map.addLayer({
     id: 'picked-line',
     type: 'line',
     source: 'picked',
-    paint: { 'line-color': '#1f6f4a', 'line-width': 1.4 },
+    paint: { 'line-color': '#2bff9e', 'line-width': 1.8 },
   });
 
   map.on('moveend', redraw);
@@ -157,6 +215,31 @@ map.on('mouseup', (event) => {
     else selected.delete(key);
   }
   redraw();
+});
+
+// Drawn under the grid, so the squares you are picking stay readable over them.
+for (const name of Object.keys(KK7) as Overlay[]) {
+  const box = document.getElementById(name) as HTMLInputElement;
+  box.addEventListener('change', () => {
+    map.setLayoutProperty(name, 'visibility', box.checked ? 'visible' : 'none');
+    localStorage.setItem(`overlay:${name}`, String(box.checked));
+  });
+  if (localStorage.getItem(`overlay:${name}`) === 'true') box.checked = true;
+}
+
+const opacity = document.getElementById('opacity') as HTMLInputElement;
+opacity.addEventListener('input', () => {
+  for (const name of Object.keys(KK7) as Overlay[]) {
+    map.setPaintProperty(name, 'raster-opacity', Number(opacity.value) / 100);
+  }
+});
+
+map.on('load', () => {
+  // Applied after the layers exist, so a choice survives a reload.
+  for (const name of Object.keys(KK7) as Overlay[]) {
+    const box = document.getElementById(name) as HTMLInputElement;
+    if (box.checked) map.setLayoutProperty(name, 'visibility', 'visible');
+  }
 });
 
 // ---------------------------------------------------------------- persistence

@@ -33,6 +33,12 @@
       ul { margin: 0; padding-left: 18px; }
       li { margin-bottom: 3px; word-break: break-all; }
       code { background: #f2f4f7; padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+      .overlays { margin: 0 0 12px; padding: 10px 12px; background: #f5f7f9;
+                  border-radius: 8px; display: grid; gap: 6px; }
+      .overlays label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+      .overlays small { color: #5b6470; }
+      .overlays .slider { gap: 10px; font-size: 12.5px; color: #5b6470; }
+      .overlays input[type=range] { flex: 1; }
       #status { margin-top: 10px; font-size: 12.5px; color: #1f6f4a; min-height: 1.2em; }
       #status.err { color: #a4342a; }
       kbd { background: #f2f4f7; border: 1px solid #d7dce3; border-bottom-width: 2px;
@@ -47,6 +53,11 @@
         Click a square to include it. <kbd>Shift</kbd>-drag to add a block,
         <kbd>Alt</kbd>-drag to remove one.
       </p>
+      <div class="overlays">
+        <label><input type="checkbox" id="skyways" /> Skyways <small>where people fly</small></label>
+        <label><input type="checkbox" id="thermals" /> Thermals <small>where they climb</small></label>
+        <label class="slider">Strength <input type="range" id="opacity" min="20" max="100" value="75" /></label>
+      </div>
       <div class="count"><span id="count">0</span> <small>cells · <span id="area">0</span> km²</small></div>
       <div class="row">
         <button id="save" class="primary">Save</button>
