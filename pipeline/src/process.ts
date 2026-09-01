@@ -37,10 +37,12 @@ import { readLayer, type RawElement, type RawGeometry } from './source.ts';
 import { simplify } from './simplify.ts';
 
 /**
- * Ship cells are ~55 km square, so a builder viewport usually touches one to
- * four of them.
+ * Ship cells are z9 tiles — 54 km square, so a builder viewport usually touches
+ * one to four of them. A tile rather than a span in degrees so that cells are
+ * square at every latitude and nest inside the coverage grid and the vector
+ * tiles; see `mercator.ts`.
  */
-const SHIP_CELL = 0.5;
+const CHUNK_ZOOM = 9;
 
 /** Rivers are drawn as thin lines; half a pixel of fidelity is not worth the bytes. */
 const RIVER_TOLERANCE_KM = 0.05;
@@ -77,7 +79,7 @@ async function writeJson(file: string, data: unknown) {
 function bucketByCell<T extends { bbox: BBox }>(features: T[]): Map<string, T[]> {
   const cells = new Map<string, T[]>();
   for (const feature of features) {
-    for (const key of cellsCovering(feature.bbox, SHIP_CELL)) {
+    for (const key of cellsCovering(feature.bbox, CHUNK_ZOOM)) {
       const bucket = cells.get(key);
       if (bucket) bucket.push(feature);
       else cells.set(key, [feature]);
@@ -110,7 +112,7 @@ function bucketByGeometry<T extends { shape: Shape }>(features: T[]): Map<string
           Math.min(a[0], b[0]), Math.min(a[1], b[1]),
           Math.max(a[0], b[0]), Math.max(a[1], b[1]),
         ];
-        for (const key of cellsCovering(segment, SHIP_CELL)) keys.add(key);
+        for (const key of cellsCovering(segment, CHUNK_ZOOM)) keys.add(key);
       }
     }
     for (const key of keys) {
@@ -520,7 +522,7 @@ async function main() {
     generatedAt: new Date().toISOString().slice(0, 10),
     attribution: '© OpenStreetMap contributors (ODbL)',
     area: COVERAGE,
-    cellSize: SHIP_CELL,
+    chunkZoom: CHUNK_ZOOM,
     ...terrain,
     context,
     water,

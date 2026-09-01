@@ -88,7 +88,7 @@ export async function loadArea(
   bbox: [number, number, number, number],
   kinds: KindId[],
 ): Promise<QuizFeature[]> {
-  const wanted = cellsCovering(bbox, index.cellSize);
+  const wanted = cellsCovering(bbox, index.chunkZoom);
 
   const batches = await Promise.all(
     kinds.flatMap((kind) => {
@@ -144,7 +144,7 @@ export async function loadPlaces(
   zoom: number,
 ): Promise<PlaceFeature[]> {
   const batches = await Promise.all(
-    cellsCovering(bbox, index.cellSize)
+    cellsCovering(bbox, index.chunkZoom)
       .filter((cell) => index.places.cells[cell])
       .map((cell) => loadCell('places', cell) as Promise<PlaceFeature[]>),
   );
@@ -178,7 +178,7 @@ export async function loadContext(
   index: PoolIndex,
   bbox: [number, number, number, number],
 ): Promise<ContextCollection> {
-  const wanted = cellsCovering(bbox, index.cellSize);
+  const wanted = cellsCovering(bbox, index.chunkZoom);
   const batches = await Promise.all(
     (['context', 'water'] as const).flatMap((dir) =>
       wanted

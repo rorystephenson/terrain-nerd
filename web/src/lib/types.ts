@@ -80,7 +80,8 @@ export type PoolIndex = {
   generatedAt: string;
   attribution: string;
   area: [number, number, number, number];
-  cellSize: number;
+  /** Zoom of the XYZ tiles the pool is chunked into. */
+  chunkZoom: number;
   kinds: KindInfo[];
   places: {
     count: number;

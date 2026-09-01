@@ -1,14 +1,33 @@
 /**
  * Client-side half of the chunk grid.
  *
- * Deliberately a small copy of `pipeline/src/grid.ts` rather than a shared
- * module: crossing the workspace boundary would mean Vite `fs.allow` rules and
- * a build-time dependency on the pipeline, for fifteen lines of arithmetic. The
- * key format is pinned by tests on both sides, which is what actually has to
- * agree.
+ * Deliberately a small copy of `pipeline/src/mercator.ts` and
+ * `pipeline/src/grid.ts` rather than a shared module: crossing the workspace
+ * boundary would mean Vite `fs.allow` rules and a build-time dependency on the
+ * pipeline, for twenty lines of arithmetic. `grid.test.ts` pins the two copies
+ * together, which is what actually has to agree.
+ *
+ * Cells are ordinary XYZ tiles, so they are square on the ground at every
+ * latitude and nest inside the vector tile pyramid. Tile Y counts *southward*,
+ * unlike the degree grid this replaced.
  */
 
 export type BBox = [number, number, number, number];
+
+const TILE_SIZE = 512;
+const MERCATOR_LIMIT = 85.051129;
+
+const clamp = (n: number, low: number, high: number) => Math.min(Math.max(n, low), high);
+
+export const worldSizeAt = (zoom: number): number => TILE_SIZE * 2 ** zoom;
+
+export const worldX = (lon: number, worldSize: number): number =>
+  ((lon + 180) / 360) * worldSize;
+
+export const worldY = (lat: number, worldSize: number): number => {
+  const phi = (clamp(lat, -MERCATOR_LIMIT, MERCATOR_LIMIT) * Math.PI) / 180;
+  return (0.5 - Math.log(Math.tan(Math.PI / 4 + phi / 2)) / (2 * Math.PI)) * worldSize;
+};
 
 export const keyOf = (ix: number, iy: number): string => `x${ix}y${iy}`;
 
@@ -16,14 +35,19 @@ export const keyOf = (ix: number, iy: number): string => `x${ix}y${iy}`;
  * Every cell the box touches.
  *
  * East and north edges are exclusive, so a box landing exactly on a boundary
- * does not drag in the neighbour it merely grazes.
+ * does not drag in the neighbour it merely grazes. The box's *north* edge gives
+ * the lowest index, because tile Y counts southward.
  */
-export function cellsCovering(box: BBox, size: number): string[] {
+export function cellsCovering(box: BBox, zoom: number): string[] {
   const [w, s, e, n] = box;
-  const minX = Math.floor(w / size);
-  const minY = Math.floor(s / size);
-  const maxX = Math.max(minX, Math.ceil(e / size) - 1);
-  const maxY = Math.max(minY, Math.ceil(n / size) - 1);
+  const worldSize = worldSizeAt(zoom);
+  const xAt = (lon: number) => worldX(lon, worldSize) / TILE_SIZE;
+  const yAt = (lat: number) => worldY(lat, worldSize) / TILE_SIZE;
+
+  const minX = Math.floor(xAt(w));
+  const minY = Math.floor(yAt(n));
+  const maxX = Math.max(minX, Math.ceil(xAt(e)) - 1);
+  const maxY = Math.max(minY, Math.ceil(yAt(s)) - 1);
 
   const keys: string[] = [];
   for (let ix = minX; ix <= maxX; ix++) {

@@ -19,6 +19,7 @@
  * draws.
  */
 import { haversineKm, type LonLat } from './geo.ts';
+import { worldSizeAt, worldX, worldY } from './mercator.ts';
 import { buildIndex } from './spatial.ts';
 
 export type PlaceInput = {
@@ -32,8 +33,6 @@ export type PlaceInput = {
   at: LonLat;
 };
 
-/** MapLibre's transform is built on 512px tiles; `map.project` follows from it. */
-export const TILE_SIZE = 512;
 export const MIN_LABEL_ZOOM = 0;
 /** Must match `MAX_ZOOM` in web/src/lib/MapView.svelte: nothing is validated past it. */
 export const MAX_LABEL_ZOOM = 14;
@@ -57,18 +56,7 @@ export const scaleForRank = (rank: number): number => RANK_SCALE[rank - 1] ?? 1;
 
 export type Rect = { x1: number; y1: number; x2: number; y2: number };
 
-export const worldSizeAt = (zoom: number): number => TILE_SIZE * 2 ** zoom;
-
-const MERCATOR_LIMIT = 85.051129;
 const clamp = (n: number, low: number, high: number) => Math.min(Math.max(n, low), high);
-
-export const worldX = (lon: number, worldSize: number): number =>
-  ((lon + 180) / 360) * worldSize;
-
-export const worldY = (lat: number, worldSize: number): number => {
-  const phi = (clamp(lat, -MERCATOR_LIMIT, MERCATOR_LIMIT) * Math.PI) / 180;
-  return (0.5 - Math.log(Math.tan(Math.PI / 4 + phi / 2)) / (2 * Math.PI)) * worldSize;
-};
 
 /**
  * The box a name occupies, plus the clearance it demands of its neighbours.

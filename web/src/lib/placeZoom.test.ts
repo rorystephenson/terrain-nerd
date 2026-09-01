@@ -11,11 +11,9 @@ import {
   parsePopulation,
   RANK_SCALE as PIPELINE_RANK_SCALE,
   territoryKm,
-  worldSizeAt,
-  worldX,
-  worldY,
   type PlaceInput,
 } from '../../../pipeline/src/placeZoom.ts';
+import { worldSizeAt, worldX, worldY } from '../../../pipeline/src/mercator.ts';
 import { LABEL_BOX, labelRect, RANK_SCALE, scaleForRank } from './labels.ts';
 
 /*
