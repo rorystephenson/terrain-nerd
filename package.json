@@ -13,6 +13,8 @@
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",
     "preview": "npm run preview -w web",
-    "test": "npm test -w web"
+    "test": "npm test -w web",
+    "coverage": "vite --config tools/coverage/vite.config.ts",
+    "typecheck": "npm run typecheck -w pipeline && npm run check -w web && tsc -p tools/coverage --noEmit"
   }
 }

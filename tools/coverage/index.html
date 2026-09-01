@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coverage — Terrain Nerd</title>
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px/1.45 system-ui, sans-serif; color: #1d2228; }
+      #map { position: absolute; inset: 0; }
+      #panel {
+        position: absolute; top: 12px; left: 12px; width: 310px; z-index: 2;
+        background: #fff; border-radius: 10px; padding: 14px 16px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18); max-height: calc(100vh - 24px);
+        overflow: auto;
+      }
+      h1 { font-size: 15px; margin: 0 0 2px; }
+      p.hint { margin: 0 0 12px; color: #5b6470; font-size: 12.5px; }
+      .count { font-size: 26px; font-weight: 700; line-height: 1.1; }
+      .count small { font-size: 13px; font-weight: 400; color: #5b6470; }
+      .row { display: flex; gap: 8px; margin-top: 12px; }
+      button {
+        flex: 1; padding: 7px 10px; border-radius: 7px; border: 1px solid #c8ced6;
+        background: #fff; font: inherit; cursor: pointer;
+      }
+      button:hover { background: #f2f4f7; }
+      button.primary { background: #1f6f4a; border-color: #1f6f4a; color: #fff; }
+      button.primary:hover { background: #1a5c3e; }
+      button.danger { color: #a4342a; }
+      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+           color: #5b6470; margin: 16px 0 6px; }
+      ul { margin: 0; padding-left: 18px; }
+      li { margin-bottom: 3px; word-break: break-all; }
+      code { background: #f2f4f7; padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+      #status { margin-top: 10px; font-size: 12.5px; color: #1f6f4a; min-height: 1.2em; }
+      #status.err { color: #a4342a; }
+      kbd { background: #f2f4f7; border: 1px solid #d7dce3; border-bottom-width: 2px;
+            border-radius: 4px; padding: 0 4px; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="panel">
+      <h1>Supported areas</h1>
+      <p class="hint">
+        Click a square to include it. <kbd>Shift</kbd>-drag to add a block,
+        <kbd>Alt</kbd>-drag to remove one.
+      </p>
+      <div class="count"><span id="count">0</span> <small>cells · <span id="area">0</span> km²</small></div>
+      <div class="row">
+        <button id="save" class="primary">Save</button>
+        <button id="reload">Reload</button>
+        <button id="clear" class="danger">Clear</button>
+      </div>
+      <div id="status"></div>
+      <h2>Extracts needed</h2>
+      <ul id="regions"><li>—</li></ul>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
