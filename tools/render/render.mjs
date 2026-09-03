@@ -80,6 +80,8 @@ page.on('pageerror', (error) => console.error('page error:', String(error).slice
 await page.goto(PAGE, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => typeof window.renderBlock === 'function', null, { timeout: 30000 });
 const BLOCK = await page.evaluate(() => window.blockSize);
+// The renderer paints the coverage boundary into the tiles, so it needs to know it.
+await page.evaluate(([z, cells]) => window.setCoverage(z, cells), [coverage.zoom, coverage.cells]);
 
 let written = 0;
 let skipped = 0;
