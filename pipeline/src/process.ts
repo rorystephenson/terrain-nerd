@@ -92,42 +92,6 @@ function bucketByCell<T extends { bbox: BBox }>(features: T[]): Map<string, T[]>
   return cells;
 }
 
-/**
- * Buckets context features by the cells their geometry actually crosses.
- *
- * `bucketByCell` works off the bounding box, which is right for a compact quiz
- * feature but disastrous for roads: a long diagonal road has an enormous bbox
- * and would be copied into every cell of that rectangle, most of which it never
- * enters. Walking segment by segment keeps a road only in the cells it really
- * passes through.
- */
-function bucketByGeometry<T extends { shape: Shape }>(features: T[]): Map<string, T[]> {
-  const cells = new Map<string, T[]>();
-  for (const feature of features) {
-    const rings: LonLat[][] =
-      feature.shape.type === 'MultiPolygon'
-        ? feature.shape.coordinates.flat()
-        : feature.shape.coordinates;
-    const keys = new Set<string>();
-    for (const ring of rings) {
-      for (let i = 1; i < ring.length; i++) {
-        const [a, b] = [ring[i - 1], ring[i]];
-        const segment: BBox = [
-          Math.min(a[0], b[0]), Math.min(a[1], b[1]),
-          Math.max(a[0], b[0]), Math.max(a[1], b[1]),
-        ];
-        for (const key of cellsCovering(segment, CHUNK_ZOOM)) keys.add(key);
-      }
-    }
-    for (const key of keys) {
-      const bucket = cells.get(key);
-      if (bucket) bucket.push(feature);
-      else cells.set(key, [feature]);
-    }
-  }
-  return cells;
-}
-
 async function writeChunks(
   dir: string,
   cells: Map<string, { bbox: BBox }[]>,
@@ -369,48 +333,6 @@ function drawnLines(
 }
 
 /**
- * Writes drawn features as one geometry per kind per cell.
- *
- * OSM splits major roads into half a million short ways, and at a couple of
- * vertices each the GeoJSON wrapper around a way costs several times more than
- * its coordinates. Concatenating them collapses the shipped size fourfold.
- */
-async function writeDrawn(dir: string, items: Drawn[]): Promise<Record<string, number>> {
-  await rm(join(OUT_DIR, dir), { recursive: true, force: true });
-  const counts: Record<string, number> = {};
-
-  for (const [cell, bucket] of bucketByGeometry(items)) {
-    const groups = new Map<string, Drawn[]>();
-    for (const item of bucket) {
-      // Keyed on the geometry type too: a group is written as one Multi*, so
-      // mixing lines and polygons would emit one of them with the other's
-      // nesting, which renders as garbage strung across the map.
-      const key = `${item.kind}|${item.class ?? ''}|${item.shape.type}`;
-      const group = groups.get(key);
-      if (group) group.push(item);
-      else groups.set(key, [item]);
-    }
-    const features = [...groups.values()].map((group) => ({
-      type: 'Feature' as const,
-      geometry:
-        group[0].shape.type === 'MultiPolygon'
-          ? {
-              type: 'MultiPolygon' as const,
-              coordinates: group.flatMap((i) => (i.shape as { coordinates: LonLat[][][] }).coordinates),
-            }
-          : {
-              type: 'MultiLineString' as const,
-              coordinates: group.flatMap((i) => (i.shape as { coordinates: LonLat[][] }).coordinates),
-            },
-      properties: { kind: group[0].kind, ...(group[0].class ? { class: group[0].class } : {}) },
-    }));
-    await writeJson(join(dir, `${cell}.geojson`), { type: 'FeatureCollection', features });
-    counts[cell] = bucket.length;
-  }
-  return counts;
-}
-
-/**
  * Lakes and rivers, unlabeled, purely for orientation.
  *
  * Lakes are shapes and rivers are lines, so they get different tolerances: a
@@ -494,14 +416,12 @@ async function buildWater() {
   );
 
   for (const item of items) drawn.push(item);
-  const cells = await writeDrawn('water', items);
   console.log(
     `  Water: ${lakes.toLocaleString()} lakes + ${rivers.toLocaleString()} waterways ` +
       `+ ${ocean.toLocaleString()} sea ` +
-      `across ${Object.keys(cells).length} cells ` +
       `(${vertices.toLocaleString()} vertices -> ${kept.toLocaleString()})`,
   );
-  return { count: items.length, cells };
+  return { count: items.length };
 }
 
 /**
@@ -576,41 +496,14 @@ async function buildContext() {
     `    roads: ${roads.toLocaleString()} ways -> ${joined.items.length.toLocaleString()} stitched lines`,
   );
 
+  // Straight to the tile build: roads and glaciers are drawn and never asked
+  // about, so nothing needs them as addressable features any more.
   for (const item of items) drawn.push(item);
-  const cells = await writeDrawn('context', items);
   console.log(
     `  Context: ${roads.toLocaleString()} roads + ${glaciers.toLocaleString()} glaciers ` +
-      `across ${Object.keys(cells).length} cells ` +
       `(${vertices.toLocaleString()} vertices -> ${kept.toLocaleString()})`,
   );
-  return { count: items.length, cells };
-}
-
-/**
- * The chunks a layer already has on disk from a previous run.
- *
- * Rebuilding water means re-reading 178 MB of river geometry, and context 296 MB
- * of roads, for output that almost never changes — so when a run is only about
- * the terrain layer the counts are read back off disk instead. That keeps
- * `index.json` honest about what is actually there.
- */
-function readExisting(dir_: string): { count: number; cells: Record<string, number> } {
-  try {
-    const dir = join(OUT_DIR, dir_);
-    const cells: Record<string, number> = {};
-    let count = 0;
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith('.geojson')) continue;
-      const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as {
-        features: unknown[];
-      };
-      cells[file.replace(/\.geojson$/, '')] = parsed.features.length;
-      count += parsed.features.length;
-    }
-    return { count, cells };
-  } catch {
-    return { count: 0, cells: {} };
-  }
+  return { count: items.length };
 }
 
 /** Everything the basemap draws, gathered for the tile build. */
@@ -628,9 +521,9 @@ async function main() {
   const terrain = await buildTerrain();
   // Roads and glaciers change even less often than the terrain does, and tuning
   // how place names are thinned means re-running this repeatedly.
-  const context = values['skip-context'] ? readExisting('context') : await buildContext();
-  // Water is the slowest layer by far; `--skip-water` reuses what is on disk.
-  const water = values['skip-water'] ? readExisting('water') : await buildWater();
+  const context = values['skip-context'] ? { count: 0 } : await buildContext();
+  // Water is the slowest layer by far.
+  const water = values['skip-water'] ? { count: 0 } : await buildWater();
 
   /*
    * Tiles come last, from everything the two layers drew. Skipping either layer
@@ -650,8 +543,9 @@ async function main() {
     area: COVERAGE,
     chunkZoom: CHUNK_ZOOM,
     ...terrain,
-    context,
-    water,
+    // The basemap furniture is a tileset now rather than addressable chunks, so
+    // there is no cell list here for the client to look anything up in.
+    basemap: { tiles: 'data/context.pmtiles', drawn: context.count + water.count },
   });
   console.log('\n  wrote index.json');
 }

@@ -6,7 +6,7 @@
   import Prompt from './lib/Prompt.svelte';
   import QuizList from './lib/QuizList.svelte';
   import Results from './lib/Results.svelte';
-  import { loadByIds, loadContext, loadIndex, loadPlaces } from './lib/chunks.ts';
+  import { loadByIds, loadIndex, loadPlaces } from './lib/chunks.ts';
   import { placeFetchBox } from './lib/places.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
   import {
@@ -29,7 +29,6 @@
     type QuizState,
   } from './lib/quiz.ts';
   import type {
-    ContextCollection,
     MapLabel,
     PlaceFeature,
     PoolIndex,
@@ -58,7 +57,6 @@
   let best = $state<Record<string, number>>({});
 
   let features = $state.raw<QuizFeature[]>([]);
-  let context = $state.raw<ContextCollection>({ type: 'FeatureCollection', features: [] });
   let places = $state.raw<PlaceFeature[]>([]);
   let quiz = $state<QuizState | null>(null);
   let feedback = $state<Feedback | null>(null);
@@ -102,14 +100,10 @@
     const spec = current.spec;
     let cancelled = false;
 
-    Promise.all([
-      loadByIds(pool, spec.bbox, spec.featureIds),
-      loadContext(pool, spec.bbox),
-    ])
-      .then(([loaded, furniture]) => {
+    loadByIds(pool, spec.bbox, spec.featureIds)
+      .then((loaded) => {
         if (cancelled) return;
         features = loaded;
-        context = furniture;
         quiz = createQuiz(loaded);
       })
       .catch((error: unknown) => {
@@ -363,7 +357,6 @@
       {#if promptHeight > 0}
         <MapView
           {collection}
-          context={context}
           mode="play"
           {activeIds}
           bbox={screen.spec.bbox}

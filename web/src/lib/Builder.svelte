@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import MapView from './MapView.svelte';
-  import { loadArea, loadByIds, loadContext, loadPlaces } from './chunks.ts';
+  import { loadArea, loadByIds, loadPlaces } from './chunks.ts';
   import {
     clearOverrides,
     initialState,
@@ -18,7 +18,6 @@
   import { newQuizId } from './storage.ts';
   import type {
     BuilderState,
-    ContextCollection,
     Inclusion,
     KindId,
     PlaceFeature,
@@ -119,7 +118,6 @@
    * reassigned, which is exactly what `$state.raw` is for.
    */
   let pool = $state.raw<QuizFeature[]>([]);
-  let context = $state.raw<ContextCollection>({ type: 'FeatureCollection', features: [] });
   let places = $state.raw<PlaceFeature[]>([]);
   let loading = $state(false);
   let name = $state(seed.name);
@@ -239,24 +237,6 @@
     reconciled = true;
   });
 
-  /**
-   * Roads and glaciers follow the map, not the chosen area.
-   *
-   * While you are still picking an area they have to track the view for the
-   * same reason place names do: they are what you navigate by, and a blank
-   * hillshade gives you nothing to recognise the valley from.
-   */
-  $effect(() => {
-    const box = step === 'area' ? view : area;
-    if (!box) return;
-    let cancelled = false;
-    loadContext(index, box).then((furniture) => {
-      if (!cancelled) context = furniture;
-    });
-    return () => {
-      cancelled = true;
-    };
-  });
 
   /**
    * Place names, always on and always following the map.
@@ -343,7 +323,6 @@
 
 <MapView
   {collection}
-  context={context}
   mode="build"
   bbox={home}
   coverage={index.area}

@@ -23,7 +23,6 @@
   } from './mapStyle.ts';
   import { isIncluded, isLocked } from './builder.ts';
   import type {
-    ContextCollection,
     FeatureFile,
     Inclusion,
     MapLabel,
@@ -33,7 +32,6 @@
 
   type Props = {
     collection: FeatureFile;
-    context: ContextCollection;
     mode?: MapMode;
     /** Feature ids drawn for the current round. Play mode only. */
     activeIds?: string[];
@@ -69,7 +67,6 @@
 
   let {
     collection,
-    context,
     mode = 'play',
     activeIds,
     bbox,
@@ -552,7 +549,7 @@
    *
    * The whole body is untracked, not just the reads that plainly need it.
    * Almost everything touched here is state the map is answerable *to* rather
-   * than built *from* — `buildStyle` reads `indexed` and `context`, the opening
+   * than built *from* — `buildStyle` reads `indexed`, the opening
    * camera reads `bounds`, the leash reads `chrome` — and any one of them left
    * tracked makes the map depend on its own data. Loading a chunk, or the
    * prompt bar growing a line, then tears the map down and constructs a new
@@ -577,11 +574,7 @@
                 bounds,
               )
             : null,
-        style: buildStyle(
-          context as GeoJSON.FeatureCollection,
-          indexed as GeoJSON.FeatureCollection,
-          mode,
-        ),
+        style: buildStyle(indexed as GeoJSON.FeatureCollection, mode),
       };
 
       const instance = new maplibregl.Map({
@@ -654,11 +647,6 @@
     source?.setData(indexed as GeoJSON.FeatureCollection);
   });
 
-  $effect(() => {
-    if (!map) return;
-    const source = map.getSource('context') as maplibregl.GeoJSONSource | undefined;
-    source?.setData(context as GeoJSON.FeatureCollection);
-  });
 
   // Play draws only the round's features — the player chooses between visible
   // candidates, Seterra-style, rather than hunting blank terrain. The builder

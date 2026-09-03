@@ -281,8 +281,10 @@ const SHORTEST_ON_TOP: ExpressionSpecification = [
  * no glyph endpoint and therefore no API key, and no name can reach the map
  * except through the app's own HTML markers.
  */
+/** Where the basemap tiles live, relative to the page. */
+const TILE_URL = 'data/context.pmtiles';
+
 export function buildStyle(
-  context: GeoJSON.FeatureCollection,
   features: GeoJSON.FeatureCollection,
   mode: MapMode = 'play',
 ): StyleSpecification {
@@ -300,7 +302,19 @@ export function buildStyle(
         maxzoom: DEM_MAXZOOM,
         attribution: 'Terrain: Mapzen / AWS Open Data',
       },
-      context: { type: 'geojson', data: context },
+      /*
+       * Roads, glaciers, water and the sea, as one vector tileset.
+       *
+       * It used to be a GeoJSON source fed a viewport's worth of cells, which
+       * cost about 11 MB in 314 requests to look at the whole country and
+       * re-parsed the entire collection on every pan. Tiles are 70 KB for the
+       * same view and MapLibre manages them itself.
+       */
+      context: {
+        type: 'vector',
+        url: `pmtiles://${TILE_URL}`,
+        attribution: '© OpenStreetMap contributors (ODbL)',
+      },
       features: { type: 'geojson', data: features, promoteId: 'idx' },
     },
     layers: [
@@ -326,6 +340,7 @@ export function buildStyle(
         id: 'glacier',
         type: 'fill',
         source: 'context',
+        'source-layer': 'context',
         filter: ['==', ['get', 'kind'], 'glacier'],
         paint: { 'fill-color': '#e4edf3', 'fill-opacity': 0.95 },
       },
@@ -379,6 +394,7 @@ export function buildStyle(
         id: 'ocean',
         type: 'fill',
         source: 'context',
+        'source-layer': 'context',
         filter: ['==', ['get', 'kind'], 'ocean'],
         paint: { 'fill-color': '#9ec6df', 'fill-opacity': 1 },
       },
@@ -386,6 +402,7 @@ export function buildStyle(
         id: 'rivers',
         type: 'line',
         source: 'context',
+        'source-layer': 'context',
         filter: ['==', ['get', 'kind'], 'river'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
@@ -401,6 +418,7 @@ export function buildStyle(
         id: 'lakes',
         type: 'fill',
         source: 'context',
+        'source-layer': 'context',
         filter: ['==', ['get', 'kind'], 'lake'],
         paint: { 'fill-color': '#a9cee4', 'fill-opacity': 0.9 },
       },
@@ -408,6 +426,7 @@ export function buildStyle(
         id: 'roads-casing',
         type: 'line',
         source: 'context',
+        'source-layer': 'context',
         filter: ['==', ['get', 'kind'], 'road'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
@@ -419,6 +438,7 @@ export function buildStyle(
         id: 'roads',
         type: 'line',
         source: 'context',
+        'source-layer': 'context',
         filter: ['==', ['get', 'kind'], 'road'],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {

@@ -43,16 +43,6 @@ export type PlaceFeature = {
   };
 };
 
-/** Basemap furniture: never a quiz answer, never named on the map. */
-export type ContextCollection = {
-  type: 'FeatureCollection';
-  features: {
-    type: 'Feature';
-    geometry: GeoJSON.Geometry;
-    properties: { kind: 'road' | 'glacier' | 'lake' | 'river' | 'ocean'; class?: string };
-  }[];
-};
-
 /** A numeric property the builder puts a range slider on. */
 export type FilterSpec = {
   key: 'lengthKm' | 'popularity';
@@ -93,8 +83,8 @@ export type PoolIndex = {
     /** The label box the thinning measured with, so a mismatch is at least visible. */
     labelBox?: { charWidth: number; padding: number; height: number; gap: number };
   };
-  context: { count: number; cells: Record<string, number> };
-  water: { count: number; cells: Record<string, number> };
+  /** The basemap furniture, as one vector tileset rather than chunks. */
+  basemap?: { tiles: string; drawn: number };
 };
 
 /** Whether a feature is in the quiz, and whether the filter or the user decided. */

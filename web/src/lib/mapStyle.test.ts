@@ -19,8 +19,8 @@ import { gradeFor, MAX_TRIES } from './quiz.ts';
 import { ELEVATION_STOPS } from './terrain.ts';
 
 const empty = { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
-const style = buildStyle(empty, empty);
-const buildMode = buildStyle(empty, empty, 'build');
+const style = buildStyle(empty);
+const buildMode = buildStyle(empty, 'build');
 
 test('style passes the MapLibre style specification', () => {
   for (const [name, candidate] of [['play', style], ['build', buildMode]] as const) {

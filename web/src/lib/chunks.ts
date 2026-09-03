@@ -9,7 +9,6 @@
 import { boxesOverlap, cellsCovering, geometryIntersectsBox, pointInBox } from './grid.ts';
 import { visibleAtZoom } from './places.ts';
 import type {
-  ContextCollection,
   KindId,
   PlaceFeature,
   PoolIndex,
@@ -165,26 +164,3 @@ export async function loadPlaces(
   return out;
 }
 
-/**
- * Everything the basemap draws that is not computed from elevation: roads,
- * glaciers, lakes and rivers.
- *
- * Two directories, one collection, because they are all drawn from the same
- * source and told apart by their `kind`. A feature is written into every cell
- * its geometry crosses, so one spanning a seam arrives twice — harmless here,
- * since nothing is keyed by identity.
- */
-export async function loadContext(
-  index: PoolIndex,
-  bbox: [number, number, number, number],
-): Promise<ContextCollection> {
-  const wanted = cellsCovering(bbox, index.chunkZoom);
-  const batches = await Promise.all(
-    (['context', 'water'] as const).flatMap((dir) =>
-      wanted
-        .filter((cell) => index[dir]?.cells[cell])
-        .map((cell) => loadCell(dir, cell) as Promise<ContextCollection['features']>),
-    ),
-  );
-  return { type: 'FeatureCollection', features: batches.flat() };
-}
