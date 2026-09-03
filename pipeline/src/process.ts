@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { readOcean } from './coastline.ts';
-import { coverageBBox, readCoverage } from './coverage.ts';
+import { coverageBBox, readCoverage, type Coverage } from './coverage.ts';
 import { COVERAGE } from './extract.ts';
 import {
   classify,
@@ -24,7 +24,6 @@ import {
 } from './featureTypes.ts';
 import { bboxOf, lineLengthKm, type BBox, type LonLat } from './geo.ts';
 import { cellsCovering } from './grid.ts';
-import { scorePool } from './importance.ts';
 import { normalize, type QuizFeature } from './normalize.ts';
 import { OUT_DIR } from './paths.ts';
 import {
@@ -36,6 +35,7 @@ import {
   type PlaceInput,
 } from './placeZoom.ts';
 import { readLayer, type RawElement, type RawGeometry } from './source.ts';
+import { scorePool } from './scores.ts';
 import { simplify } from './simplify.ts';
 import { stitch } from './stitch.ts';
 import { buildTiles, type TileFeature } from './tiles.ts';
@@ -115,18 +115,20 @@ function histogram(values: number[]): string {
     .join(' ');
 }
 
-async function buildTerrain() {
+async function buildTerrain(coverage: Coverage | null) {
   const byKind = new Map<KindId, RawElement[]>();
   const places: PlaceInput[] = [];
-  const flying: LonLat[] = [];
   let seen = 0;
 
   for await (const element of readLayer('terrain')) {
     seen++;
-    if (isFlyingSite(element.tags)) {
-      flying.push(element.coords[0]);
-      continue;
-    }
+    /*
+     * Still skipped, though nothing scores by them any more: a launch site is
+     * often tagged on the summit node it sits under, and letting one through
+     * would enter that peak twice. Where people fly is now measured from the
+     * flights themselves — see `scores.ts`.
+     */
+    if (isFlyingSite(element.tags)) continue;
     const kind = classify(element.tags);
     if (kind) {
       const bucket = byKind.get(kind);
@@ -155,10 +157,12 @@ async function buildTerrain() {
     features.push(...made);
   }
 
-  const popularity = await scorePool(features, flying, 'italy-sitelinks');
+  const scores = await scorePool(features, coverage);
   for (const feature of features) {
-    const score = popularity.get(feature.id);
-    if (score !== undefined) feature.properties.popularity = score;
+    const score = scores.get(feature.id);
+    if (!score) continue;
+    feature.properties.flight = score.flight;
+    feature.properties.prominence = score.prominence;
   }
 
   // One chunk set per kind, so a builder with peaks switched off never fetches them.
@@ -536,7 +540,7 @@ async function main() {
 
   console.log('Processing extracted pool:');
   const chosen = readCoverage();
-  const terrain = await buildTerrain();
+  const terrain = await buildTerrain(chosen);
   // Roads and glaciers change even less often than the terrain does, and tuning
   // how place names are thinned means re-running this repeatedly.
   const context = values['skip-context'] ? { count: 0 } : await buildContext();

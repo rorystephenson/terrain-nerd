@@ -6,8 +6,10 @@ export type FeatureProperties = {
   lengthKm: number;
   /** A point on the feature itself, used to hang its label. */
   anchor: [number, number];
-  /** 0-100 percentile within the kind. Set for peaks and passes. */
-  popularity?: number;
+  /** 0-1, how much flying happens around it. Set for peaks and passes. */
+  flight?: number;
+  /** 0-1, how far it stands over what is near it. Set for peaks and passes. */
+  prominence?: number;
   wikidata?: string;
   ele?: number;
 };
@@ -45,7 +47,7 @@ export type PlaceFeature = {
 
 /** A numeric property the builder puts a range slider on. */
 export type FilterSpec = {
-  key: 'lengthKm' | 'popularity';
+  key: 'lengthKm' | 'flight' | 'prominence';
   label: string;
   unit: string;
   min: number;

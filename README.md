@@ -14,8 +14,8 @@ and narrow them down with one slider each:
 | Type | Filter |
 |---|---|
 | Valleys | length |
-| Mountains | popularity |
-| Passes | popularity |
+| Mountains | flight proximity, prominence |
+| Passes | flight proximity, prominence |
 
 ### Framing the area
 
@@ -62,29 +62,38 @@ load. A file holds the quiz itself and never your scores — those belong to the
 browser that earned them. Loading merges rather than overwrites, so a file
 dropped onto a browser that already has quizzes cannot destroy them.
 
-### Why popularity rather than altitude
+### Two scores, kept apart
 
-Altitude is close to useless as a relevance filter: a 2,000 m peak you fly past
-every week matters more than a 3,500 m one you never see. Ranking by elevation
-also fills the top of the list with sub-summits — "Anticima Sud" is literally
-"south sub-peak" — while the names pilots actually say sit a thousand metres
-lower.
+Ranking peaks by altitude fills the top of the list with sub-summits — "Anticima
+Sud" is literally "south sub-peak" — while the names pilots actually say sit a
+thousand metres lower. So mountains and passes carry two computed scores
+instead, each 0–1, each with its own slider.
 
-Popularity is a 0–100 percentile built from three signals:
+**Flight proximity** is how much people fly near or over the feature, read
+straight off thermal.kk7.ch's skyways layer — every logged XC flight drawn on
+top of every other one. Not "can you launch here", which is what an OSM
+`sport=free_flying` tag says and what this used to be scored on, but where
+anyone actually goes. See [The flight score](#the-flight-score).
 
-- **Topographic isolation** — distance to the nearest higher peak. This is what
-  separates a mountain you navigate by from a bump on someone else's ridge, and
-  it demolishes the sub-summit problem on its own.
-- **Wikidata sitelinks** — how many language Wikipedias carry an article, as a
-  proxy for "a name you hear often".
-- **Distance to a free-flying site** — OSM tags takeoffs and landings, so peaks
-  near where people actually fly get a boost.
+**Prominence** is `sqrt(height x dominance)`: how tall it is, against 4,000 m,
+times how far you have to go to find anything higher. It answers "the big one
+round here" rather than "the big one". The two terms multiply rather than
+average on purpose — a shoulder of Mont Blanc is as tall as mountains get and
+has something higher fifty metres away, and a sum would still call that half a
+mountain. A pass has no isolation worth measuring, since by definition something
+higher is right beside it, so it swaps that term for how much mountain stands
+over it.
 
-Around the Brenta this puts Cima Brenta, Presanella, Cima Tosa, Carè Alto and
-Paganella at the top, and spot-heights like "Quota 3368" at the bottom.
+They are deliberately **not** blended into one number. Around the Brenta they
+pull apart in exactly the way that makes the distinction worth having: Doss del
+Sabion, the Pinzolo takeoff, scores 0.65 on flight and 0.42 on prominence, while
+Cima Brenta — the highest thing for miles and nobody's flight path — is 0.15 and
+0.78. Which of those belongs in a quiz depends on why you are building it.
 
-Passes drop the isolation term — a saddle is by definition a low point between
-two higher things, so its isolation is always tiny and says nothing.
+Both slide **one stop past the top to "none"**, which empties the set so you can
+pin a handful back in by hand. The score they replaced could not do that: it was
+a percentile, so its top bucket held 373 peaks by construction, and dragging to
+the end still left every one of them selected.
 
 ## Playing
 
@@ -171,9 +180,10 @@ rather than minutes. Skipping either also skips the vector tiles, since half a
 basemap is worse than no rebuild at all.
 
 `extract:data` writes only to `pipeline/cache/osm/`; `build:data` reads only from
-it. The one network call in step 2 is Wikidata sitelink counts, which are cached
-on disk and requested only for ids not already held, so an interrupted run
-resumes rather than restarting.
+it. The one network call in step 2 is the skyways tiles, cached on disk under
+`pipeline/cache/skyways/` and fetched only where they are missing, so an
+interrupted run resumes rather than restarting and a second run touches the
+network not at all.
 
 ### Picking the ground, and paying for it
 
@@ -223,7 +233,7 @@ Five commands, in order, and nothing to clean up by hand:
 ```bash
 npm run coverage       # click the new squares, Save
 npm run extract:data   # downloads anything new, re-clips, re-filters
-npm run build:data     # chunks, place-name zooms, vector tiles
+npm run build:data     # skyways tiles, scores, chunks, place-name zooms
 npm run render:tiles   # draws the new tiles and the wider ones they invalidate
 npm run upload:tiles   # sends what is new or changed
 ```
@@ -244,6 +254,67 @@ silent, so it errs toward doing the work. What it does *not* do is re-download:
 extracts are fetched under a `.part` name and renamed on success, so a file that
 is there is a whole file, and new ground inside an extract you already hold
 costs no network at all.
+
+### The flight score
+
+thermal.kk7.ch draws every logged XC flight on top of every other one, so its
+skyways layer is a direct record of the ground pilots pass over. The pipeline
+reads it as a raster rather than looking at it.
+
+Four things about the service, measured rather than assumed:
+
+- It is served **TMS**, so the row counts from the south. Getting that wrong
+  does not fail loudly — the server answers with placeholders and the layer just
+  reads as empty ground.
+- Past a layer's maxzoom it returns a **1x1 placeholder rather than a 404**, so
+  a tile that is not 256x256 has to be refused before it is written. One cached
+  under a real tile's name is a hole in the raster nothing later would notice.
+- **The density is in the alpha, not the colours.** Half the tiles come back
+  8-bit palette, and the palette is a quantiser's output whose indices carry no
+  order at all; alpha runs cleanly 0 to 255 as the ramp goes transparent through
+  dark green to saturated blue.
+- The other half come back **straight RGBA**, unlabelled and five times the
+  size, presumably wherever quantisation would have lost too much. Both have to
+  be read, which is why `png.ts` handles two colour types.
+
+**Zoom 11**, chosen by measuring headroom before the ramp clips rather than by
+taking the deepest available:
+
+| zoom | tiles | m/px @46°N | ink saturated |
+|---|---|---|---|
+| 10 | 539 | 106 | 7.5% |
+| **11** | **2,156** | **53** | **0.4%** |
+| 12 | 8,624 | 27 | 1.1% |
+| 13 | 34,496 | 13 | 5.5% |
+
+z13 draws its lines thin and fully opaque, so the busiest ground clips and stops
+being distinguishable; z10 has aggregated so far that 72% of its pixels are lit.
+z11 has by far the most range left, and is a quarter the tiles of z12.
+
+Alpha is then **box-averaged 4x4** on the way in. Density is an integral, so
+averaging is the right reduction rather than an approximation of one, and every
+query blurs over kilometres anyway — it takes the whole coverage from 141 MB of
+alpha to 8.3 MB, which is what lets it sit in memory as a sparse map of tiles
+with missing ones reading as zero.
+
+Each feature then samples a **Gaussian disc, sigma 1.5 km**, truncated at three
+sigma. That is the whole reason "near" counts and not just "over": a track that
+misses a summit by a kilometre still lands well inside the kernel, one that
+misses by five is outside it. Sigma is the one dial on the score. The kernels
+are built per degree of latitude, because a pixel is a fixed slice of the
+projection rather than of the ground — one kernel in pixels would mean 1.5 km in
+Bavaria and 1.8 km in Sicily.
+
+The result is scaled by the **99th percentile** of what was actually measured,
+not by 255. A weighted mean over a 4.5 km disc is a small number even over the
+busiest sky, since most of any disc is empty, so scaling against the ramp's
+maximum would push everything into the bottom tenth of the slider. Ground with
+no flights over it still scores a true zero.
+
+Sanity, by name rather than by histogram: the top of the flight score is
+Annecy — La Tournette, Dents de Lanfon, Roc des Boeufs — which is about the
+busiest flying site there is. The top of prominence is Mont Blanc, Barre des
+Écrins, Gran Paradiso, Finsteraarhorn, Dufourspitze, in that order.
 
 ### Why not Overpass
 
@@ -543,7 +614,9 @@ pipeline/          run on demand, never at build time
   source.ts        streams the extracts, dedupes by id
   normalize.ts     merge same-named segments by proximity
   stitch.ts        join road ways into maximal chains at junctions
-  importance.ts    popularity scoring + Wikidata sitelinks
+  scores.ts        flight proximity and prominence
+  skyways.ts       kk7 tiles: fetch, cache, and sample as a raster
+  png.ts           palette and RGBA PNG -> alpha              (pure)
   spatial.ts       grid index: nearest higher peak, radius queries
   placeZoom.ts     which zooms each settlement is named at
   simplify.ts      Douglas-Peucker
@@ -568,12 +641,12 @@ web/src/lib/
 ```
 
 The pure modules hold the logic worth being sure about, and are directly
-unit-tested — including three that live in the pipeline, `placeZoom.ts`,
-`stitch.ts` and `coverage.ts`, tested from here because this is where the test
-runner is:
+unit-tested — including five that live in the pipeline (`placeZoom.ts`,
+`stitch.ts`, `coverage.ts`, `png.ts` and `scores.ts`), tested from here because
+this is where the test runner is:
 
 ```bash
-npm test             # 139 tests
+npm test             # 177 tests
 npm run typecheck    # pipeline, web and the tools
 ```
 
@@ -581,9 +654,18 @@ npm run typecheck    # pipeline, web and the tools
 
 - **No massif names.** OSM has no consistent tagging for ranges like "the Brenta
   Dolomites", so ranges cannot be quizzed as objects.
-- **Peak isolation uses named peaks only.** An unnamed higher summit nearby will
-  not reduce a peak's isolation. In practice a named sub-summit's nearest higher
-  neighbour is the named main summit it hangs off, so this holds up.
+- **Prominence sees only named peaks.** An unnamed higher summit nearby does not
+  reduce a peak's isolation, so prominence is only as good as OSM's tagging
+  around it — a lone tagged bump on a plateau reads as dominant, and the height
+  term is all that keeps it in its place. In practice a named sub-summit's
+  nearest higher neighbour is the named main summit it hangs off, so this holds
+  up in the Alps. Local relief off the cached DEM is the upgrade if it stops
+  holding: the tiles are already there, 100% cached at z9–z11 over the whole
+  coverage.
+- **Flight proximity is a proxy, not a measurement.** kk7 renders density
+  through a transfer function nobody outside kk7 knows, so the score is monotone
+  in how much people fly somewhere but not proportional to it. That is all a
+  filter needs, but the number should never be read as flights per year.
 - **Coverage is a set of squares, and the builder does not check it.** Frame an
   area outside the rendered ground and you get a placeholder basemap and an
   empty quiz rather than a refusal. The bundled coverage set is right there; it

@@ -8,7 +8,7 @@
 
 /** A numeric property the builder can put a range slider on. */
 export type FilterSpec = {
-  key: 'lengthKm' | 'popularity';
+  key: 'lengthKm' | 'flight' | 'prominence';
   label: string;
   unit: string;
   min: number;
@@ -24,7 +24,7 @@ export type FeatureKind = {
   geometry: 'line' | 'point';
   /** Segments sharing a name within this many km are treated as one feature. */
   mergeGapKm: number;
-  /** Set when this kind needs a computed popularity rather than a raw tag. */
+  /** Set when this kind needs computed scores rather than a raw tag. */
   scored: boolean;
   filters: FilterSpec[];
 };
@@ -32,16 +32,21 @@ export type FeatureKind = {
 export type KindId = 'valley' | 'peak' | 'pass';
 
 /**
- * Peaks and passes filter on popularity alone.
+ * Peaks and passes filter on two scores rather than one, and they are kept apart
+ * on purpose: the right weighting between "people fly here" and "it stands over
+ * everything" is a thing to find by moving the sliders, not to decide here. See
+ * `scores.ts` for what each one measures.
  *
- * Altitude was considered and dropped: a 2,000 m peak you fly past every week
- * matters more than a 3,500 m one you never see, so elevation is close to
- * useless as a relevance filter. Length is genuinely meaningful for valleys.
- */
-/**
- * Defaults are calibrated to land near 40 questions over a valley-sized area,
- * measured against Val Rendena. Anything looser produces hundreds of questions
- * and an unplayable quiz — there are 744 named peaks around the Brenta alone.
+ * Length is the meaningful filter for valleys, and stays a single one.
+ *
+ * Defaults are measured against Val Rendena, the same yardstick as before: of
+ * its 316 named peaks and 37 passes they admit 25 and 9, which is a playable
+ * quiz rather than an afternoon. Loosening either by 0.05 roughly triples it.
+ *
+ * The two scores really do pull apart there, which is the point of keeping them
+ * separate: Doss del Sabion, the Pinzolo takeoff, comes top on flight at 0.65
+ * and only 0.42 on prominence, while Cima Brenta — the highest thing for miles
+ * and nobody's flight path — is 0.78 and 0.15 the other way.
  */
 export const kinds = {
   valley: {
@@ -61,7 +66,8 @@ export const kinds = {
     mergeGapKm: 0,
     scored: true,
     filters: [
-      { key: 'popularity', label: 'Popularity', unit: '', min: 0, max: 100, step: 1, default: [95, 100] },
+      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.3, 1] },
+      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.35, 1] },
     ],
   },
   pass: {
@@ -71,7 +77,8 @@ export const kinds = {
     mergeGapKm: 0,
     scored: true,
     filters: [
-      { key: 'popularity', label: 'Popularity', unit: '', min: 0, max: 100, step: 1, default: [95, 100] },
+      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.3, 1] },
+      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.35, 1] },
     ],
   },
 } satisfies Record<KindId, FeatureKind>;

@@ -35,7 +35,8 @@ const kinds: KindInfo[] = [
     count: 0,
     cells: {},
     filters: [
-      { key: 'popularity', label: 'Popularity', unit: '', min: 0, max: 100, step: 1, default: [60, 100] },
+      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.3, 1] },
+      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.6, 1] },
     ],
   },
 ];
@@ -50,13 +51,13 @@ function valley(id: string, name: string, lengthKm: number): QuizFeature {
   };
 }
 
-function peak(id: string, name: string, popularity: number): QuizFeature {
+function peak(id: string, name: string, flight: number, prominence: number): QuizFeature {
   return {
     type: 'Feature',
     id,
     bbox: [11, 46, 11, 46],
     geometry: { type: 'Point', coordinates: [11, 46] },
-    properties: { name, kind: 'peak', lengthKm: 0, anchor: [11, 46], popularity },
+    properties: { name, kind: 'peak', lengthKm: 0, anchor: [11, 46], flight, prominence },
   };
 }
 
@@ -64,7 +65,7 @@ test('a fresh builder turns every kind on at its default range', () => {
   const state = initialState(kinds);
   assert.deepEqual(state.kinds, { valley: true, peak: true });
   assert.deepEqual(state.ranges.valley, { lengthKm: [3, 40] });
-  assert.deepEqual(state.ranges.peak, { popularity: [60, 100] });
+  assert.deepEqual(state.ranges.peak, { flight: [0.3, 1], prominence: [0.6, 1] });
   assert.deepEqual(state.overrides, {});
 });
 
@@ -72,8 +73,25 @@ test('the filter includes what is in range and excludes what is not', () => {
   const state = initialState(kinds);
   assert.equal(matchesFilter(valley('a', 'Long', 9), state), true);
   assert.equal(matchesFilter(valley('b', 'Short', 2), state), false);
-  assert.equal(matchesFilter(peak('c', 'Famous', 95), state), true);
-  assert.equal(matchesFilter(peak('d', 'Bump', 4), state), false);
+  assert.equal(matchesFilter(peak('c', 'Flown and big', 0.9, 0.8), state), true);
+  assert.equal(matchesFilter(peak('d', 'Bump', 0.04, 0.05), state), false);
+});
+
+test('every filter has to pass, not just one', () => {
+  const state = initialState(kinds);
+  // Flown over constantly, but a shoulder of something bigger.
+  assert.equal(matchesFilter(peak('e', 'Busy shoulder', 0.95, 0.1), state), false);
+  // A giant in a corner nobody flies.
+  assert.equal(matchesFilter(peak('f', 'Quiet giant', 0.05, 0.95), state), false);
+});
+
+test('a floor above the top of the scale selects nothing', () => {
+  // What the builder's "none" stop sets. The point of it is starting from an
+  // empty set and pinning a handful in by hand, which a percentile could never
+  // do: its top bucket always held something.
+  let state = initialState(kinds);
+  state = setRange(state, 'peak', 'prominence', [1.01, 1]);
+  assert.equal(matchesFilter(peak('g', 'The very best', 1, 1), state), false);
 });
 
 test('a hidden kind is excluded whatever its values say', () => {
@@ -150,8 +168,8 @@ test('resolve returns the selection, its extent, and how much was hand-picked', 
   const features = [
     valley('a', 'Long', 9),
     valley('b', 'Short', 2),
-    peak('c', 'Famous', 95),
-    peak('d', 'Bump', 4),
+    peak('c', 'Famous', 0.9, 0.8),
+    peak('d', 'Bump', 0.04, 0.05),
   ];
   state = toggleOverride(state, features[1]); // pin the short valley in
   state = toggleOverride(state, features[2]); // pin the famous peak out

@@ -28,8 +28,11 @@ export function initialState(kinds: KindInfo[]): BuilderState {
   return state;
 }
 
-const valueOf = (feature: QuizFeature, key: FilterSpec['key']): number =>
-  key === 'lengthKm' ? feature.properties.lengthKm : (feature.properties.popularity ?? 0);
+const valueOf = (feature: QuizFeature, key: FilterSpec['key']): number => {
+  if (key === 'flight') return feature.properties.flight ?? 0;
+  if (key === 'prominence') return feature.properties.prominence ?? 0;
+  return feature.properties.lengthKm;
+};
 
 /**
  * Whether the sliders alone would include this feature.

@@ -24,8 +24,10 @@ export type QuizFeature = {
     lengthKm: number;
     /** Where to hang a label for this feature: a point on the feature itself. */
     anchor: LonLat;
-    /** 0-100 percentile within the kind. Set for scored kinds only. */
-    popularity?: number;
+    /** 0-1, how much flying happens around it. Set for scored kinds only. */
+    flight?: number;
+    /** 0-1, how far it stands over what is near it. Set for scored kinds only. */
+    prominence?: number;
     wikidata?: string;
     ele?: number;
   };

@@ -18,6 +18,7 @@
   import { newQuizId } from './storage.ts';
   import type {
     BuilderState,
+    FilterSpec,
     Inclusion,
     KindId,
     PlaceFeature,
@@ -308,13 +309,44 @@
     });
   }
 
+  /** Where a valley is as long as naming an area cares about. */
+  const VALLEY_FULL_KM = 40;
+
+  /**
+   * One step past the top of the scale, where the slider selects nothing.
+   *
+   * Filtering to the maximum used to leave a handful of features behind, which
+   * is no use when what you want is an empty set to hand-pick a few into. The
+   * old score was a percentile, so its top bucket was non-empty by construction
+   * — 373 peaks sat at exactly 100 — and both ends of the range compare
+   * inclusively.
+   *
+   * Nothing needed changing in `matchesFilter` for this. A floor above every
+   * value a feature can hold fails `value < min` for all of them, so the set
+   * empties through the comparison that was always there. Pinned features still
+   * survive it, because `inclusionOf` short-circuits to `locked-in` before the
+   * filter is consulted at all.
+   */
+  const noneStop = (filter: FilterSpec) => filter.max + filter.step;
+
+  /** Steps like 0.01 land on 0.30000000000000004 without this. */
+  const round = (value: number, step: number) =>
+    step < 1 ? value.toFixed(String(step).split('.')[1]?.length ?? 2) : String(value);
+
   /** The most prominent thing in the selection usually names the area well. */
   function suggestedName(): string {
-    const best = [...picked.included].sort(
-      (a, b) =>
-        (b.properties.popularity ?? b.properties.lengthKm) -
-        (a.properties.popularity ?? a.properties.lengthKm),
-    )[0];
+    /*
+     * Prominence rather than flight: an area is named after the mountain that
+     * dominates it, not after wherever the traffic happens to funnel.
+     *
+     * A valley has neither score, so its length stands in — but it has to be
+     * brought onto the same 0-1 scale first. Compared raw, twenty kilometres of
+     * valley beats every mountain there has ever been, and every quiz would be
+     * named after the longest valley it touches.
+     */
+    const rank = (f: QuizFeature) =>
+      f.properties.prominence ?? Math.min(1, f.properties.lengthKm / VALLEY_FULL_KM);
+    const best = [...picked.included].sort((a, b) => rank(b) - rank(a))[0];
     return best ? `Around ${best.properties.name}` : 'My quiz';
   }
 </script>
@@ -403,17 +435,18 @@
         {#if builder.kinds[kind.id]}
           {#each kind.filters as filter (filter.key)}
             {@const range = builder.ranges[kind.id]?.[filter.key] ?? filter.default}
+            {@const none = noneStop(filter)}
             <div class="filter">
               <div class="filter-head">
                 <span>{filter.label}</span>
-                <span class="value">
-                  {range[0]}{filter.unit} +
+                <span class="value" class:none={range[0] >= none}>
+                  {range[0] >= none ? 'none' : `${round(range[0], filter.step)}${filter.unit} +`}
                 </span>
               </div>
               <input
                 type="range"
                 min={filter.min}
-                max={filter.max}
+                max={none}
                 step={filter.step}
                 value={range[0]}
                 oninput={(e) =>
@@ -553,6 +586,8 @@
     color: var(--muted);
   }
   .value { font-variant-numeric: tabular-nums; color: #1d232b; font-weight: 600; }
+  /* The stop that selects nothing reads as off rather than as a number. */
+  .value.none { color: #8a94a2; font-weight: 500; font-style: italic; }
   input[type='range'] { width: 100%; margin-top: 0.15rem; }
 
   .tally {
