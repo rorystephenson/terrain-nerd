@@ -433,9 +433,15 @@
         </label>
 
         {#if builder.kinds[kind.id]}
-          {#each kind.filters as filter (filter.key)}
+          {#each kind.filters as filter, at (filter.key)}
             {@const range = builder.ranges[kind.id]?.[filter.key] ?? filter.default}
             {@const none = noneStop(filter)}
+            <!--
+              The sliders add to each other rather than narrowing each other, and
+              nothing about two stacked sliders says which. Without the word,
+              every reading of this panel is the wrong one.
+            -->
+            {#if at > 0}<div class="joiner">or</div>{/if}
             <div class="filter">
               <div class="filter-head">
                 <span>{filter.label}</span>
@@ -586,6 +592,13 @@
     color: var(--muted);
   }
   .value { font-variant-numeric: tabular-nums; color: #1d232b; font-weight: 600; }
+  .joiner {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8a94a2;
+    margin: 0.1rem 0 0.25rem;
+  }
   /* The stop that selects nothing reads as off rather than as a number. */
   .value.none { color: #8a94a2; font-weight: 500; font-style: italic; }
   input[type='range'] { width: 100%; margin-top: 0.15rem; }

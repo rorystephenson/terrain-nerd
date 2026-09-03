@@ -57,6 +57,24 @@ const ELE_FILL_KM = 10;
  */
 const BUSY_PERCENTILE = 0.99;
 
+/**
+ * Below this prominence, flying overhead stops counting as flying *here*.
+ *
+ * Skyways is a two-dimensional record: a track crossing a valley at 2,500 m
+ * paints the valley floor exactly as a track along a ridge paints the ridge. So
+ * the raw sample over Dosso Saiano — 343 m, under the Garda-to-Trento corridor —
+ * comes out as high as the sample over Monte Stivo, and a score that says so is
+ * describing the airspace rather than the mountain.
+ *
+ * Scaling by prominence up to this point fixes that without touching anything
+ * above it: a feature that is a mountain at all keeps its full score, and ground
+ * under traffic is demoted in proportion to how little of a feature it is. Over
+ * the Adamello and Brenta it drops the flown set from 76 to 55 without losing
+ * one of the twelve peaks a person actually picked; at Annecy it costs Le Thoron
+ * at 597 m and Mont Rampignon at 894 m, which is the intended kind of loss.
+ */
+const FLIGHT_MIN_PROMINENCE = 0.3;
+
 export type Scores = { flight: number; prominence: number };
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
@@ -153,33 +171,36 @@ export async function scorePool(
     ? await readSkyways(coverage)
     : { worldSize: 1, cells: new Map<string, Uint8Array>() };
 
+  // Prominence first: the flight score is scaled by it, so it has to exist
+  // before the sampled ink can be turned into a score.
+  const prominences = scored.map((feature) => {
+    const at = feature.properties.anchor;
+    const ele = elevationOf(at, feature.properties.ele);
+    if (feature.properties.kind === 'peak') {
+      return peakProminence(ele, peakIndex.nearest(at, (p) => p.ele > ele, ISOLATION_CAP_KM));
+    }
+    // Spread into Math.max would be a stack overflow waiting for a dense enough
+    // neighbourhood; the pool has already been bitten by that once.
+    let highest = 0;
+    for (const peak of peakIndex.within(at, FLANK_RANGE_KM, () => true)) {
+      if (peak.ele > highest) highest = peak.ele;
+    }
+    return passProminence(ele, highest - ele);
+  });
+
   const raw = sampleFlight(raster, scored.map((f) => f.properties.anchor));
+  // Gated before the reference is taken, so "the busy end" means the busy end of
+  // real features rather than of whatever the corridors happen to cross.
+  for (let i = 0; i < raw.length; i++) {
+    raw[i] *= clamp01(prominences[i] / FLIGHT_MIN_PROMINENCE);
+  }
   const busy = quantile(raw, BUSY_PERCENTILE);
 
   const flights: number[] = [];
-  const prominences: number[] = [];
   for (let i = 0; i < scored.length; i++) {
-    const feature = scored[i];
-    const at = feature.properties.anchor;
-    const ele = elevationOf(at, feature.properties.ele);
-
     const flight = busy > 0 ? clamp01(raw[i] / busy) : 0;
-    let prominence: number;
-    if (feature.properties.kind === 'peak') {
-      prominence = peakProminence(ele, peakIndex.nearest(at, (p) => p.ele > ele, ISOLATION_CAP_KM));
-    } else {
-      // Spread into Math.max would be a stack overflow waiting for a dense
-      // enough neighbourhood; the pool has already been bitten by that once.
-      let highest = 0;
-      for (const peak of peakIndex.within(at, FLANK_RANGE_KM, () => true)) {
-        if (peak.ele > highest) highest = peak.ele;
-      }
-      prominence = passProminence(ele, highest - ele);
-    }
-
     flights.push(flight);
-    prominences.push(prominence);
-    out.set(feature.id, { flight: round3(flight), prominence: round3(prominence) });
+    out.set(scored[i].id, { flight: round3(flight), prominence: round3(prominences[i]) });
   }
 
   console.log(`    flight     ${deciles(flights)}`);

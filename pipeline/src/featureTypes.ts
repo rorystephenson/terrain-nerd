@@ -32,21 +32,20 @@ export type FeatureKind = {
 export type KindId = 'valley' | 'peak' | 'pass';
 
 /**
- * Peaks and passes filter on two scores rather than one, and they are kept apart
- * on purpose: the right weighting between "people fly here" and "it stands over
- * everything" is a thing to find by moving the sliders, not to decide here. See
- * `scores.ts` for what each one measures.
+ * Peaks and passes filter on two scores rather than one, and the two sliders
+ * **union** — each adds what it admits, rather than narrowing what the other
+ * left. See `matchesFilter` in `web/src/lib/builder.ts` for why that is the only
+ * combination that can express a real selection, and `scores.ts` for what each
+ * score measures.
  *
  * Length is the meaningful filter for valleys, and stays a single one.
  *
- * Defaults are measured against Val Rendena, the same yardstick as before: of
- * its 316 named peaks and 37 passes they admit 25 and 9, which is a playable
- * quiz rather than an afternoon. Loosening either by 0.05 roughly triples it.
- *
- * The two scores really do pull apart there, which is the point of keeping them
- * separate: Doss del Sabion, the Pinzolo takeoff, comes top on flight at 0.65
- * and only 0.42 on prominence, while Cima Brenta — the highest thing for miles
- * and nobody's flight path — is 0.78 and 0.15 the other way.
+ * Defaults read as "the ones people fly, plus the landmarks", and they are set
+ * where those two thresholds sit: 0.5 admits a mountain that is genuinely flown,
+ * 0.7 admits one that stands over everything near it whether anyone flies it or
+ * not. Over Val Rendena that is 21 peaks and 5 passes; over a hand-picked quiz
+ * spanning the Adamello, Brenta and Ledro it holds ten of the twelve peaks a
+ * person actually chose, the other two being a judgement call no score reaches.
  */
 export const kinds = {
   valley: {
@@ -66,8 +65,8 @@ export const kinds = {
     mergeGapKm: 0,
     scored: true,
     filters: [
-      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.3, 1] },
-      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.35, 1] },
+      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.5, 1] },
+      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.7, 1] },
     ],
   },
   pass: {
@@ -77,8 +76,8 @@ export const kinds = {
     mergeGapKm: 0,
     scored: true,
     filters: [
-      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.3, 1] },
-      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.35, 1] },
+      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.5, 1] },
+      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.75, 1] },
     ],
   },
 } satisfies Record<KindId, FeatureKind>;

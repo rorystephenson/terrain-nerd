@@ -84,16 +84,38 @@ mountain. A pass has no isolation worth measuring, since by definition something
 higher is right beside it, so it swaps that term for how much mountain stands
 over it.
 
-They are deliberately **not** blended into one number. Around the Brenta they
-pull apart in exactly the way that makes the distinction worth having: Doss del
-Sabion, the Pinzolo takeoff, scores 0.65 on flight and 0.42 on prominence, while
-Cima Brenta — the highest thing for miles and nobody's flight path — is 0.15 and
-0.78. Which of those belongs in a quiz depends on why you are building it.
+**The two sliders add to each other rather than narrowing each other.** Each one
+contributes the features it admits, so the panel reads "the ones people fly, plus
+the landmarks" — and turning one down to `none` leaves the other still choosing,
+which is how you look at either group on its own.
 
-Both slide **one stop past the top to "none"**, which empties the set so you can
-pin a handful back in by hand. The score they replaced could not do that: it was
-a percentile, so its top bucket held 373 peaks by construction, and dragging to
-the end still left every one of them selected.
+That is not a preference, it is the only combination that can express a real
+selection. A hand-picked quiz over the Adamello, Brenta and Ledro came to twelve
+peaks, and they fall into two groups that do not overlap at all:
+
+| flown | | landmarks | |
+|---|---|---|---|
+| Monte Stivo | 0.74 / 0.56 | Cima Presanella | 0.08 / 0.84 |
+| Doss del Sabion | 0.67 / 0.42 | Monte Adamello | 0.01 / 0.81 |
+| Monte Cornetto | 0.57 / 0.65 | Cima Brenta | 0.15 / 0.78 |
+| Monte Cadria | 0.58 / 0.60 | Carè Alto | 0.05 / 0.74 |
+| Cima Lancia | 0.56 / 0.29 | Cima Tosa | 0.23 / 0.56 |
+| Monte Tremalzo | 0.53 / 0.51 | Paganella | 0.25 / 0.54 |
+
+*(flight / prominence)*
+
+Intersecting those sliders cannot hold both columns. To reach Monte Adamello the
+flight floor has to drop to 0.01, and to reach Cima Lancia the prominence floor
+has to drop to 0.29 — together that is **575 peaks** before the set is complete.
+Unioning them holds ten of the twelve in **59**, the missing two being Paganella
+and Cima Tosa, which sit below the landmark threshold and are a judgement call no
+score is going to make for you.
+
+Both slide **one stop past the top to "none"**. Since they union, it takes both
+of them to empty the set — which is what you want before pinning a handful in by
+hand. The score they replaced could not do that at all: it was a percentile, so
+its top bucket held 373 peaks by construction, and dragging to the end still left
+every one of them selected.
 
 ## Playing
 
@@ -304,6 +326,16 @@ misses by five is outside it. Sigma is the one dial on the score. The kernels
 are built per degree of latitude, because a pixel is a fixed slice of the
 projection rather than of the ground — one kernel in pixels would mean 1.5 km in
 Bavaria and 1.8 km in Sicily.
+
+Then it is **scaled by prominence, up to 0.3**. Skyways is a two-dimensional
+record: a track crossing a valley at 2,500 m paints the valley floor exactly as a
+track along a ridge paints the ridge, so the raw sample over Dosso Saiano — 343 m,
+under the Garda-to-Trento corridor — comes out as high as the sample over Monte
+Stivo. A score that says so is describing the airspace rather than the mountain.
+Scaling leaves everything above 0.3 untouched and demotes ground under traffic in
+proportion to how little of a feature it is: over the Adamello and Brenta it takes
+the flown set from 76 peaks to 55 without losing one of the twelve a person
+picked, and at Annecy it costs Le Thoron at 597 m and Mont Rampignon at 894 m.
 
 The result is scaled by the **99th percentile** of what was actually measured,
 not by 255. A weighted mean over a 4.5 km disc is a small number even over the

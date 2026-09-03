@@ -37,6 +37,20 @@ const valueOf = (feature: QuizFeature, key: FilterSpec['key']): number => {
 /**
  * Whether the sliders alone would include this feature.
  *
+ * **The sliders union, they do not intersect.** Each one adds the features it
+ * admits; a feature is in if any slider wants it. That is the difference
+ * between two questions you can ask together — "the ones people fly, plus the
+ * landmarks" — and one question that gets narrower with every slider you touch.
+ *
+ * It is not a preference. Intersecting cannot express a real selection at all:
+ * over the Adamello, Brenta and Ledro, a hand-picked set of twelve splits into
+ * six that are flown (Monte Stivo, Doss del Sabion, Cima Lancia...) and six
+ * that are landmarks nobody flies over (Adamello, Presanella, Cima Brenta...),
+ * and the two groups do not overlap. Intersecting needs floors low enough to
+ * admit 575 peaks before it holds all twelve. Unioning holds ten in 55.
+ *
+ * A kind with one slider is unaffected either way, which is every other kind.
+ *
  * Never consults the overrides — that separation is what lets a pinned feature
  * survive any amount of slider dragging.
  */
@@ -44,11 +58,15 @@ export function matchesFilter(feature: QuizFeature, state: BuilderState): boolea
   const kind = feature.properties.kind;
   if (!state.kinds[kind]) return false;
 
-  for (const [key, [min, max]] of Object.entries(state.ranges[kind] ?? {})) {
+  const ranges = Object.entries(state.ranges[kind] ?? {});
+  // No sliders is not the same question as no slider wanting it.
+  if (ranges.length === 0) return true;
+
+  for (const [key, [min, max]] of ranges) {
     const value = valueOf(feature, key as FilterSpec['key']);
-    if (value < min || value > max) return false;
+    if (value >= min && value <= max) return true;
   }
-  return true;
+  return false;
 }
 
 export function inclusionOf(feature: QuizFeature, state: BuilderState): Inclusion {

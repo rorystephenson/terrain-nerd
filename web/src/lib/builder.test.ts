@@ -77,21 +77,37 @@ test('the filter includes what is in range and excludes what is not', () => {
   assert.equal(matchesFilter(peak('d', 'Bump', 0.04, 0.05), state), false);
 });
 
-test('every filter has to pass, not just one', () => {
+test('the sliders add to each other rather than narrowing each other', () => {
+  /*
+   * The two groups a real selection is made of, and they do not overlap: a
+   * mountain people fly which is nobody's landmark, and a landmark nobody
+   * flies over. Intersecting the sliders can hold neither without floors low
+   * enough to hold half the country as well.
+   */
   const state = initialState(kinds);
-  // Flown over constantly, but a shoulder of something bigger.
-  assert.equal(matchesFilter(peak('e', 'Busy shoulder', 0.95, 0.1), state), false);
-  // A giant in a corner nobody flies.
-  assert.equal(matchesFilter(peak('f', 'Quiet giant', 0.05, 0.95), state), false);
+  assert.equal(matchesFilter(peak('e', 'Busy shoulder', 0.95, 0.1), state), true);
+  assert.equal(matchesFilter(peak('f', 'Quiet giant', 0.05, 0.95), state), true);
+  // Neither slider wants it, so it stays out.
+  assert.equal(matchesFilter(peak('g', 'Neither', 0.05, 0.1), state), false);
 });
 
-test('a floor above the top of the scale selects nothing', () => {
-  // What the builder's "none" stop sets. The point of it is starting from an
-  // empty set and pinning a handful in by hand, which a percentile could never
-  // do: its top bucket always held something.
+test('one slider at "none" leaves the other still choosing', () => {
+  // What makes the two groups separable at all: turn off flight and what is
+  // left is the landmarks, on their own.
   let state = initialState(kinds);
+  state = setRange(state, 'peak', 'flight', [1.01, 1]);
+  assert.equal(matchesFilter(peak('h', 'Busy bump', 0.95, 0.1), state), false);
+  assert.equal(matchesFilter(peak('i', 'Quiet giant', 0.05, 0.95), state), true);
+});
+
+test('every slider at "none" selects nothing', () => {
+  // The point of the stop is starting from an empty set and pinning a handful
+  // in by hand, which a percentile could never do: its top bucket always held
+  // something. Unioned, it takes both sliders to empty the set.
+  let state = initialState(kinds);
+  state = setRange(state, 'peak', 'flight', [1.01, 1]);
   state = setRange(state, 'peak', 'prominence', [1.01, 1]);
-  assert.equal(matchesFilter(peak('g', 'The very best', 1, 1), state), false);
+  assert.equal(matchesFilter(peak('j', 'The very best', 1, 1), state), false);
 });
 
 test('a hidden kind is excluded whatever its values say', () => {
