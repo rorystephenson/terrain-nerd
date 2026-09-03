@@ -34,8 +34,13 @@ export type PlaceInput = {
 };
 
 export const MIN_LABEL_ZOOM = 0;
-/** Must match `MAX_ZOOM` in web/src/lib/MapView.svelte: nothing is validated past it. */
-export const MAX_LABEL_ZOOM = 14;
+/**
+ * Must match `MAX_ZOOM` in web/src/lib/MapView.svelte: nothing is validated past
+ * it, and a name thinned in above the ceiling can never be drawn. At 14 that was
+ * 38,238 of 107,043 names shipped and unreachable — about 7 MB of the places
+ * directory paid for and never used.
+ */
+export const MAX_LABEL_ZOOM = 12;
 
 /**
  * The ink a name puts on the screen. Must match `web/src/lib/labels.ts`, or this
@@ -159,10 +164,18 @@ const HANDOVER_PX = 350;
  * The takeover count alone retires names far too early: three frazioni are drawn
  * around Trento by z11, when the screen still shows twenty kilometres and
  * "Trento" is still the most useful word on it. This is the other half of the
- * test — the map has to actually be inside the place — and roughly a screen's
- * width is where being inside it starts.
+ * test — the map has to actually be inside the place.
+ *
+ * Recalibrated when the view ceiling dropped from z14 to z12. At 900px the rule
+ * read "the place is wider than most of the screen", which at z14 was a fair
+ * description of being inside it; with the map stopping at z12 that point is
+ * never reached and Trento — the case the rule was written for — stopped
+ * handing over at all, leaving only Milano and Firenze. 550px is the same idea
+ * measured against the shallower ceiling: about 40% of a screen's width, which
+ * at z12 is Trento at 582px and Bolzano at 556px, and still excludes Rovereto
+ * at 340px.
  */
-const TERRITORY_SPAN_PX = 900;
+const TERRITORY_SPAN_PX = 550;
 
 /** The equator in metres, for turning a radius on the ground into pixels. */
 const EARTH_CIRCUMFERENCE_M = 40075016.686;
@@ -324,8 +337,16 @@ export function assignZoomRanges(places: readonly PlaceInput[]): ZoomRanges {
     pending = still;
   }
 
-  // Still crowded out at the deepest zoom the map goes to. Named there anyway:
-  // a settlement the map refuses to name at all is worse than a rare overlap.
-  for (const place of pending) min.set(place.key, MAX_LABEL_ZOOM);
+  /*
+   * Whatever is still crowded out at the deepest zoom gets no `minzoom` at all,
+   * and the caller drops it.
+   *
+   * These used to be named at the ceiling anyway, on the grounds that a
+   * settlement the map refuses to name is worse than a rare overlap. That held
+   * while the ceiling was z14 and the leftovers were 9,703 hamlets in the gaps.
+   * At z12 the leftovers are 67,617 — most of the pool — and naming them all at
+   * one zoom is not a rare overlap but an unreadable map, none of it validated
+   * against anything. There is no room for them, so they are not shipped.
+   */
   return { min, max };
 }

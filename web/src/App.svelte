@@ -8,6 +8,7 @@
   import Results from './lib/Results.svelte';
   import { loadByIds, loadIndex, loadPlaces } from './lib/chunks.ts';
   import { placeFetchBox } from './lib/places.ts';
+  import { useCoverage } from './lib/tiles.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
   import {
     deleteQuiz as removeQuiz,
@@ -84,7 +85,12 @@
     quizzes = loadQuizzes();
     best = loadBest();
     loadIndex()
-      .then((loaded) => (index = loaded))
+      .then((loaded) => {
+        // Before anything draws: the tile protocol needs it to tell an
+        // uncovered tile from a missing one.
+        useCoverage(loaded.coverage);
+        index = loaded;
+      })
       .catch((error: unknown) => {
         loadError = error instanceof Error ? error.message : String(error);
       });

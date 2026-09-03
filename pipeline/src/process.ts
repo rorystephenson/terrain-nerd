@@ -180,7 +180,10 @@ async function buildTerrain() {
   // Which names may be drawn at which zooms, decided once for the whole country
   // so the browser never has to decide it from a viewport. See `placeZoom.ts`.
   const zooms = assignZoomRanges(places);
-  const placeFeatures = places.map((place) => ({
+  // A place with no zoom range never found room at any zoom the map reaches, so
+  // it would ship and never draw.
+  const drawable = places.filter((place) => zooms.min.has(place.key));
+  const placeFeatures = drawable.map((place) => ({
     type: 'Feature' as const,
     bbox: [place.at[0], place.at[1], place.at[0], place.at[1]] as BBox,
     geometry: { type: 'Point' as const, coordinates: place.at },
@@ -188,13 +191,16 @@ async function buildTerrain() {
       name: place.name,
       // Still shipped: it is what the renderer sizes and weights a name by.
       rank: place.rank,
-      minzoom: zooms.min.get(place.key) ?? MAX_LABEL_ZOOM,
+      minzoom: zooms.min.get(place.key)!,
       // Omitted for the majority, which never hand over. Absent means forever.
       ...(zooms.max.has(place.key) ? { maxzoom: zooms.max.get(place.key) } : {}),
     },
   }));
   const placeCells = await writeChunks('places', bucketByCell(placeFeatures));
-  console.log(`  Places: ${placeFeatures.length.toLocaleString()} across ${Object.keys(placeCells).length} cells`);
+  console.log(
+    `  Places: ${placeFeatures.length.toLocaleString()} across ${Object.keys(placeCells).length} cells ` +
+      `(${(places.length - drawable.length).toLocaleString()} with no room at any zoom, dropped)`,
+  );
   console.log(`    first drawn at zoom: ${histogram(placeFeatures.map((p) => p.properties.minzoom))}`);
   console.log(`    hand over to finer names: ${zooms.max.size.toLocaleString()}`);
 
@@ -518,6 +524,7 @@ async function main() {
   });
 
   console.log('Processing extracted pool:');
+  const chosen = readCoverage();
   const terrain = await buildTerrain();
   // Roads and glaciers change even less often than the terrain does, and tuning
   // how place names are thinned means re-running this repeatedly.
@@ -543,9 +550,15 @@ async function main() {
     area: COVERAGE,
     chunkZoom: CHUNK_ZOOM,
     ...terrain,
-    // The basemap furniture is a tileset now rather than addressable chunks, so
-    // there is no cell list here for the client to look anything up in.
-    basemap: { tiles: 'data/context.pmtiles', drawn: context.count + water.count },
+    /*
+     * The ground the basemap tiles were rendered for.
+     *
+     * Shipped so the client can tell an uncovered tile from a missing one
+     * without asking the network — 527 keys is about 5 KB, against a request
+     * per tile that would 404. Coverage only ever grows, so a stale copy in a
+     * cached bundle under-claims and never over-claims.
+     */
+    coverage: chosen ? { zoom: chosen.zoom, cells: chosen.cells } : null,
   });
   console.log('\n  wrote index.json');
 }

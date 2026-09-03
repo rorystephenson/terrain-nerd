@@ -26,7 +26,6 @@ import { join } from 'node:path';
 
 import type { LonLat } from './geo.ts';
 import { CACHE_DIR } from './paths.ts';
-import { OUT_DIR } from './paths.ts';
 
 /** As deep as the app goes is 14; tiles stop at 13 and MapLibre overzooms. */
 const MAX_TILE_ZOOM = 13;
@@ -95,15 +94,17 @@ async function writeSeq(path: string, features: readonly TileFeature[]): Promise
 }
 
 /**
- * Builds `data/context.pmtiles` from everything the basemap draws.
+ * Builds the vector tiles the renderer draws from.
  *
- * One archive rather than a directory of tiles: on a VM it is one file to
- * rsync instead of tens of thousands, and nginx serves the byte ranges out of
- * it with no configuration and no tile server.
+ * A build intermediate rather than a shipped artifact: the browser is served
+ * pre-rendered images now, and this is what `tools/render` points MapLibre at
+ * to make them. Tippecanoe's per-zoom simplification is exactly what a renderer
+ * wants, so nothing about the earlier work is wasted — it just stops being the
+ * thing that reaches the user.
  */
 export async function buildTiles(features: readonly TileFeature[]): Promise<number> {
   const seq = join(CACHE_DIR, 'context.geojsonseq');
-  const out = join(OUT_DIR, 'context.pmtiles');
+  const out = join(CACHE_DIR, 'context.pmtiles');
   await writeSeq(seq, features);
 
   await run('tippecanoe', [

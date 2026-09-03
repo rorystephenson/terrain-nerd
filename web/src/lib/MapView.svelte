@@ -104,8 +104,14 @@
   const PAN_SLACK_MAX_PX = 120;
   /** Breathing room left around the area when framing it, in screen pixels. */
   const FRAME_MARGIN_PX = 40;
-  /** As far in as the terrain data is worth showing. */
-  const MAX_ZOOM = 14;
+  /**
+   * One level past the rendered tiles, which stop at z11.
+   *
+   * The deepest view worth having was measured at z10.9; this leaves a step of
+   * overzoom for looking closely at a cluster of summits, at the cost of
+   * magnifying a tile 2x.
+   */
+  const MAX_ZOOM = 12;
   /** Below this, naming every candidate would be unreadable anyway. */
   const NAME_FROM_ZOOM = 9.5;
   /**

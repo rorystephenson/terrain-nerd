@@ -282,15 +282,17 @@ const SHORTEST_ON_TOP: ExpressionSpecification = [
  * except through the app's own HTML markers.
  */
 /** Where the basemap tiles live, relative to the page. */
-const TILE_URL = 'data/context.pmtiles';
-
-export function buildStyle(
-  features: GeoJSON.FeatureCollection,
-  mode: MapMode = 'play',
-): StyleSpecification {
-  const color = mode === 'build' ? buildColor : playColor;
-  const opacity = mode === 'build' ? buildOpacity : 1;
-
+/**
+ * The style the *renderer* draws: terrain shaded from raw elevation, with roads,
+ * water and glaciers over it. Nothing in the app uses this — the app is served
+ * the images it produces.
+ *
+ * It stays here, beside the app's own style, so both are built from one set of
+ * colours and one set of constants. A separate style file for the renderer would
+ * drift from this one silently, and the drift would only show as tiles that no
+ * longer match the map they are meant to be.
+ */
+export function buildBasemapStyle(vectorTiles: string): StyleSpecification {
   return {
     version: 8,
     sources: {
@@ -302,20 +304,11 @@ export function buildStyle(
         maxzoom: DEM_MAXZOOM,
         attribution: 'Terrain: Mapzen / AWS Open Data',
       },
-      /*
-       * Roads, glaciers, water and the sea, as one vector tileset.
-       *
-       * It used to be a GeoJSON source fed a viewport's worth of cells, which
-       * cost about 11 MB in 314 requests to look at the whole country and
-       * re-parsed the entire collection on every pan. Tiles are 70 KB for the
-       * same view and MapLibre manages them itself.
-       */
       context: {
         type: 'vector',
-        url: `pmtiles://${TILE_URL}`,
+        url: `pmtiles://${vectorTiles}`,
         attribution: '© OpenStreetMap contributors (ODbL)',
       },
-      features: { type: 'geojson', data: features, promoteId: 'idx' },
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#e8eae4' } },
@@ -446,6 +439,50 @@ export function buildStyle(
           'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 14, 3.6],
         },
       },
+    ],
+  };
+}
+
+/**
+ * Where the rendered basemap tiles come from.
+ *
+ * Overridden at build time so production points at Cloudflare R2 while a dev
+ * server reads them off disk. Tiles are the same either way; only the origin
+ * moves.
+ */
+// Optional-chained because this module is also imported by `node --test` and by
+// the renderer, neither of which is Vite and neither of which defines it.
+const TILE_BASE = import.meta.env?.VITE_TILE_BASE ?? '/tiles';
+
+export function buildStyle(
+  features: GeoJSON.FeatureCollection,
+  mode: MapMode = 'play',
+): StyleSpecification {
+  const color = mode === 'build' ? buildColor : playColor;
+  const opacity = mode === 'build' ? buildOpacity : 1;
+
+  return {
+    version: 8,
+    sources: {
+      /*
+       * The whole basemap, drawn beforehand: relief, both hillshade passes,
+       * glaciers, sea, rivers, lakes and roads, flattened into one image per
+       * tile. What the browser used to compute from a 5 MB stream of elevation
+       * on every view now arrives as about 40 KB of picture.
+       */
+      basemap: {
+        type: 'raster',
+        tiles: [`tn://${TILE_BASE}/{z}/{x}/{y}.webp`],
+        tileSize: 512,
+        minzoom: 4,
+        maxzoom: 11,
+        attribution: '© OpenStreetMap contributors (ODbL) · Terrain: Mapzen / AWS Open Data',
+      },
+      features: { type: 'geojson', data: features, promoteId: 'idx' },
+    },
+    layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#e8eae4' } },
+      { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 1 } },
       // Casing, fill, casing, fill … so a feature is drawn over the whole of the
       // one below it rather than over only its colour. See STACK.
       ...Array.from({ length: STACK }, (_, pair) => [

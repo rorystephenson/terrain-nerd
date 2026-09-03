@@ -3,6 +3,7 @@ import test from 'node:test';
 import { expression, validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 
 import {
+  buildBasemapStyle,
   buildStyle,
   firstPickable,
   gradeColor,
@@ -19,11 +20,18 @@ import { gradeFor, MAX_TRIES } from './quiz.ts';
 import { ELEVATION_STOPS } from './terrain.ts';
 
 const empty = { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
+/** What the app draws: rendered basemap tiles, with the quiz features over them. */
 const style = buildStyle(empty);
 const buildMode = buildStyle(empty, 'build');
+/**
+ * What `tools/render` draws to *make* those tiles. Its layer ordering is what
+ * the pictures are baked with, so the assertions about shading and water moved
+ * here with the layers rather than being deleted along with them.
+ */
+const basemap = buildBasemapStyle('context.pmtiles');
 
 test('style passes the MapLibre style specification', () => {
-  for (const [name, candidate] of [['play', style], ['build', buildMode]] as const) {
+  for (const [name, candidate] of [['play', style], ['build', buildMode], ['basemap', basemap]] as const) {
     const errors = validateStyleMin(candidate as never);
     assert.deepEqual(errors.map((e) => `${e.line ?? '?'}: ${e.message}`), [], name);
   }
@@ -35,6 +43,10 @@ test('carries no symbol layer, so the map cannot leak an answer', () => {
   assert.equal(style.layers.filter((l) => l.type === 'symbol').length, 0);
   assert.equal(buildMode.layers.filter((l) => l.type === 'symbol').length, 0);
   assert.equal(style.glyphs, undefined, 'no glyph endpoint is needed');
+  // And the renderer's too, or a name would be baked into every tile it drew,
+  // where no test could ever find it again.
+  assert.equal(basemap.layers.filter((l) => l.type === 'symbol').length, 0);
+  assert.equal(basemap.glyphs, undefined);
 });
 
 test('shading is two passes, both over the ice', () => {
@@ -42,8 +54,8 @@ test('shading is two passes, both over the ice', () => {
   // 1 and the first pass already runs an opaque near-black shadow, so stacking
   // is the only remaining way to get darker. It must carry no highlight, or it
   // would lighten the map it is meant to deepen.
-  const order = style.layers.map((l) => l.id);
-  const deepen = style.layers.find((l) => l.id === 'hillshade-deepen') as {
+  const order = basemap.layers.map((l) => l.id);
+  const deepen = basemap.layers.find((l) => l.id === 'hillshade-deepen') as {
     type: string;
     paint?: Record<string, string>;
   };
@@ -55,13 +67,13 @@ test('shading is two passes, both over the ice', () => {
 
 test('water is drawn from the context source, rivers beneath lakes', () => {
   for (const id of ['lakes', 'rivers']) {
-    const layer = style.layers.find((l) => l.id === id) as { source?: string } | undefined;
+    const layer = basemap.layers.find((l) => l.id === id) as { source?: string } | undefined;
     assert.ok(layer, id);
     assert.equal(layer.source, 'context');
   }
   // OSM maps a river's course straight through the lake it flows into, so drawn
   // the other way round a blue line runs down the middle of Garda.
-  const order = style.layers.map((l) => l.id);
+  const order = basemap.layers.map((l) => l.id);
   assert.ok(order.indexOf('rivers') < order.indexOf('lakes'), 'rivers under lakes');
   // The sea goes beneath both, so a coastal lagoon and a river running to its
   // mouth stay drawn rather than being painted over by the water around them.
@@ -71,13 +83,23 @@ test('water is drawn from the context source, rivers beneath lakes', () => {
   assert.ok(order.indexOf('hillshade') < order.indexOf('ocean'), 'sea above the hillshade');
 });
 
-test('the basemap needs no source but elevation and our own context', () => {
-  // Contours were dropped, and with them the one third-party runtime dependency.
-  assert.deepEqual(Object.keys(style.sources).sort(), ['context', 'features', 'terrain']);
+test('the app fetches a picture and its own features, and nothing else', () => {
+  // The elevation stream is gone: the shading it existed to compute is baked
+  // into the tiles, and it was 5.15 MB of a 6.3 MB first load.
+  assert.deepEqual(Object.keys(style.sources).sort(), ['basemap', 'features']);
+  const basemapSource = style.sources.basemap as { type: string; maxzoom?: number };
+  assert.equal(basemapSource.type, 'raster');
+  assert.equal(basemapSource.maxzoom, 11, 'the pyramid stops here; MapLibre overzooms above it');
+});
+
+test('the renderer needs no source but elevation and our own vector tiles', () => {
+  assert.deepEqual(Object.keys(basemap.sources).sort(), ['context', 'terrain']);
+  // No quiz features: those are drawn live by the app, over the picture.
+  assert.equal(basemap.layers.filter((l) => 'source' in l && l.source === 'features').length, 0);
 });
 
 test('elevation drives the tint through a sane, ordered ramp', () => {
-  const relief = style.layers.find((l) => l.id === 'relief') as {
+  const relief = basemap.layers.find((l) => l.id === 'relief') as {
     type: string;
     paint?: Record<string, unknown>;
   };
@@ -301,7 +323,7 @@ test('feature source promotes the numeric id that feature-state indexes on', () 
 });
 
 test('terrain source is a keyless terrarium DEM', () => {
-  const source = style.sources.terrain as { type: string; encoding?: string; tiles?: string[] };
+  const source = basemap.sources.terrain as { type: string; encoding?: string; tiles?: string[] };
   assert.equal(source.type, 'raster-dem');
   assert.equal(source.encoding, 'terrarium');
   assert.ok(source.tiles?.[0] && !/[?&](key|access_token|api_key)=/i.test(source.tiles[0]));

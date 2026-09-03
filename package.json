@@ -15,6 +15,10 @@
     "preview": "npm run preview -w web",
     "test": "npm test -w web",
     "coverage": "vite --config tools/coverage/vite.config.ts",
-    "typecheck": "npm run typecheck -w pipeline && npm run check -w web && tsc -p tools/coverage --noEmit"
+    "typecheck": "npm run typecheck -w pipeline && npm run check -w web && tsc -p tools/coverage --noEmit",
+    "render:tiles": "vite --config tools/render/vite.config.ts"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }

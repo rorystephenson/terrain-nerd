@@ -193,8 +193,11 @@ test('a name keeps its place until the map is inside it', () => {
   const ranges = assignZoomRanges([trento, ...frazioni]);
 
   const handsOver = ranges.max.get('city')!;
+  // Stated as the rule rather than a fixed zoom, because the zoom moves with
+  // the view ceiling: it was 13 when the map went to z14 and is 12 now. Pinning
+  // the number would make this a test of the constants rather than of the rule.
   assert.ok(handsOver >= scaleRetireZoom(trento), 'never before the map is inside it');
-  assert.ok(handsOver >= 13, 'a city a few km across is still worth naming at z12');
+  assert.ok(handsOver > ranges.min.get('city')!, 'and never before it has appeared');
   const shown = [...frazioni].filter((f) => ranges.min.get(f.key)! < handsOver);
   assert.ok(shown.length >= 3, 'and only once there is something to hand over to');
 });
@@ -225,13 +228,36 @@ test('the answer does not depend on the order the places arrive in', () => {
   assert.deepEqual([...one.max].sort(), [...two.max].sort());
 });
 
-test('every name is drawable somewhere', () => {
-  // Crowded out even at the deepest zoom, a name is drawn there anyway: a
-  // settlement the map refuses to name at all is worse than a rare overlap.
+test('a name with no room gets no zoom, rather than a zoom it cannot use', () => {
+  // Twenty by twenty names within a few hundred metres: most of them cannot be
+  // drawn anywhere without overlapping, at any zoom the map reaches.
+  //
+  // They used to be given the deepest zoom regardless, on the grounds that a
+  // settlement the map refuses to name is worse than a rare overlap. That held
+  // while the ceiling was z14 and the leftovers were a few thousand hamlets in
+  // the gaps; at z12 it was 67,617 names stacked on one zoom, none of them ever
+  // checked against anything. The caller drops what comes back without a range.
   const places = lattice(20, 20, 0.0005);
   const ranges = assignZoomRanges(places);
-  assert.equal(ranges.min.size, places.length);
-  for (const zoom of ranges.min.values()) assert.ok(zoom <= MAX_LABEL_ZOOM);
+  assert.ok(ranges.min.size > 0, 'some of them fit');
+  assert.ok(ranges.min.size < places.length, 'and the rest are left out rather than piled up');
+  for (const zoom of ranges.min.values()) {
+    assert.ok(zoom <= MAX_LABEL_ZOOM, 'nothing is placed above the ceiling');
+  }
+});
+
+test('what is kept is still free of overlap at the ceiling', () => {
+  // The point of dropping rather than clamping: whatever survives has been
+  // checked, so the deepest view is readable instead of a heap of names.
+  const places = lattice(20, 20, 0.0005);
+  const ranges = assignZoomRanges(places);
+  const live = places.filter((p) => ranges.min.has(p.key));
+  const boxes = live.map((p) => boxAt(p, worldSizeAt(MAX_LABEL_ZOOM)));
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      assert.ok(!hits(boxes[i], boxes[j]), `${live[i].key} and ${live[j].key} overlap at the ceiling`);
+    }
+  }
 });
 
 test('importance is tiered, then by size, then stable', () => {

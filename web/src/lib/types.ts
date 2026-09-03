@@ -83,8 +83,11 @@ export type PoolIndex = {
     /** The label box the thinning measured with, so a mismatch is at least visible. */
     labelBox?: { charWidth: number; padding: number; height: number; gap: number };
   };
-  /** The basemap furniture, as one vector tileset rather than chunks. */
-  basemap?: { tiles: string; drawn: number };
+  /**
+   * The ground the basemap tiles cover, as the tiles they were chosen at.
+   * Absent on a pool built before coverage existed, which means "assume all".
+   */
+  coverage?: { zoom: number; cells: string[] } | null;
 };
 
 /** Whether a feature is in the quiz, and whether the filter or the user decided. */
