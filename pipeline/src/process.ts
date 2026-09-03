@@ -565,7 +565,7 @@ async function main() {
      * The ground the basemap tiles were rendered for.
      *
      * Shipped so the client can tell an uncovered tile from a missing one
-     * without asking the network — 527 keys is about 5 KB, against a request
+     * without asking the network — a few kilobytes of keys, against a request
      * per tile that would 404. Coverage only ever grows, so a stale copy in a
      * cached bundle under-claims and never over-claims.
      */

@@ -132,7 +132,7 @@ whatever has been rendered so far.
 
 ## Data
 
-Coverage is **chosen, not inherited from a border**: 527 z10 cells over the
+Coverage is **chosen, not inherited from a border**: 539 z10 cells over the
 Alps, the Apennines, Corsica and the Dinarides, picked by hand in
 `tools/coverage`. Inside it nothing is filtered — every named valley, peak, pass
 and settlement. The pipeline deliberately makes no judgement about what is worth
@@ -140,10 +140,10 @@ learning; that is the builder's job.
 
 | | count |
 |---|---|
-| Mountains | 73,758 |
-| Valleys | 5,960 (merged from named ways) |
-| Passes | 7,288 |
-| Settlements | 68,807 |
+| Mountains | 74,419 |
+| Valleys | 5,968 (merged from named ways) |
+| Passes | 7,306 |
+| Settlements | 69,838 |
 
 Roads, glaciers, rivers, lakes and coastline are extracted as well, but nothing
 downstream loads them: they exist only to be drawn into the basemap tiles, so
@@ -310,7 +310,7 @@ leaving a hole with no shape around it.
 **The basemap is not assembled in the browser and not bought from anyone.** It
 is rendered once on a laptop — relief, both hillshade passes, glaciers, sea,
 rivers, lakes and roads, all of it — into a pyramid of WebP tiles served from
-Cloudflare R2. z4 to z11, 2,905 tiles, 127 MB for the whole coverage. No API
+Cloudflare R2. z4 to z11, 2,967 tiles, 130 MB for the whole coverage. No API
 key, no tile bill, and nothing arrives pre-labelled.
 
 It used to be assembled live, from MapLibre's `color-relief` and `hillshade`
@@ -323,11 +323,11 @@ laptop. First load is now about 1 MB, a z6 view went from 10.9 MB to 70 KB, and
 a drag frame from 440 ms to 106 ms.
 
 The deepest view worth having was measured rather than assumed — z10.9, by
-looking — which is what makes the pyramid 2,905 tiles rather than the 180,000 a
+looking — which is what makes the pyramid 2,967 tiles rather than the 180,000 a
 z14 ceiling would need. Raster sources *round* the zoom where vector sources
 floor it, so 10.9 asks for z11, and z11 is exactly the top needed. `MAX_ZOOM` is
 12, one level of overzoom past the tiles: soft on a retina screen at full zoom,
-and the deliberate trade for a 127 MB pyramid over a roughly 580 MB one. It is
+and the deliberate trade for a 130 MB pyramid over a roughly 580 MB one. It is
 not a one-way door: re-rendering at @2x needs time and disk, not a code change.
 
 **The style contains no symbol layers at all,** and a test enforces it. Standard
@@ -395,7 +395,7 @@ covered. A free third-party terrain layer was tried there first and dropped: it
 made unsupported ground look like a working map, which is the opposite of what
 the edge of coverage should say.
 
-**Nothing decides that by taking a 404.** The 527 coverage cells ship in
+**Nothing decides that by taking a 404.** The 539 coverage cells ship in
 `index.json`, about 5 KB, and a `tn://` protocol handler resolves every tile
 request against them before the network is touched — so an uncovered tile costs
 no request and no billed read. A tile that is *covered but missing* — mid-render,
@@ -485,7 +485,7 @@ a phone can end up with no name on screen at all. `HANDOVER_PX` is the dial, and
 zero retirements is `TAKEOVER` set past any real count.
 
 **A name with no room at any zoom is dropped, not clamped to the ceiling.** The
-ceiling is z12, matching the map's, and 38,245 of 107,052 names never fit below
+ceiling is z12, matching the map's, and 38,652 of 108,490 names never fit below
 it. Giving them the ceiling as a minzoom would stack every one of them on the
 deepest zoom, which is not thinning; leaving them out takes the places directory
 from 19 MB to 12 MB.
@@ -591,7 +591,7 @@ npm run typecheck    # pipeline, web and the tools
 - **`web/public/data/` is ~39 MB**, of which place names are 12 MB and peaks
   20 MB. That is a hosting number, not a per-visit one: cells load individually,
   and a Val Rendena viewport pulls a few hundred kilobytes across four cells.
-  The basemap's 127 MB is not on that server at all — it is in R2, where egress
+  The basemap's 130 MB is not on that server at all — it is in R2, where egress
   is free.
 - **A style change costs a re-render**, not a page refresh:
   `npm run render:tiles -- --force`, six minutes with a warm DEM cache, then an

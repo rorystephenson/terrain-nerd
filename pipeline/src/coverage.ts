@@ -84,9 +84,9 @@ export function coverageBBox(coverage: Coverage): BBox {
 /**
  * Covered cells merged into as few rectangles as possible, greedily.
  *
- * One polygon per cell would work, but 527 squares sharing edges is a lot of
- * ring for osmium to test every node against, and a MultiPolygon whose parts
- * touch is the sort of thing geometry libraries have opinions about. Runs of
+ * One polygon per cell would work, but five hundred-odd squares sharing edges is
+ * a lot of ring for osmium to test every node against, and a MultiPolygon whose
+ * parts touch is the sort of thing geometry libraries have opinions about. Runs of
  * adjacent cells in a row are merged, then rows merged downward where their
  * runs line up exactly — which turns a blocky selection into a handful of
  * rectangles and leaves a scattered one no worse than it was.
