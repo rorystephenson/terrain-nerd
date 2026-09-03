@@ -4,7 +4,7 @@ import { expression, validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 
 import {
   buildBasemapStyle,
-  buildStyle,
+  buildFeatures,
   firstPickable,
   gradeColor,
   gradeLabelColor,
@@ -21,8 +21,8 @@ import { ELEVATION_STOPS } from './terrain.ts';
 
 const empty = { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
 /** What the app draws: rendered basemap tiles, with the quiz features over them. */
-const style = buildStyle(empty);
-const buildMode = buildStyle(empty, 'build');
+const style = buildFeatures(empty);
+const buildMode = buildFeatures(empty, 'build');
 /**
  * What `tools/render` draws to *make* those tiles. Its layer ordering is what
  * the pictures are baked with, so the assertions about shading and water moved

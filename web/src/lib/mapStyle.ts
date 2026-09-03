@@ -454,7 +454,18 @@ export function buildBasemapStyle(vectorTiles: string): StyleSpecification {
 // the renderer, neither of which is Vite and neither of which defines it.
 const TILE_BASE = import.meta.env?.VITE_TILE_BASE ?? '/tiles';
 
-export function buildStyle(
+/**
+ * The style the app draws: the quiz, over a picture of the ground.
+ *
+ * Thirteen of its fifteen layers are the features being quizzed — valleys,
+ * mountains and passes — and those are the ones that cannot be baked. They
+ * change with every quiz, they restyle on every click as answers land and the
+ * revealed one flashes, they are the only thing `queryRenderedFeatures` is
+ * pointed at, and in build mode they dim by inclusion through a data-driven
+ * expression. The basemap beneath them is one raster layer of tiles drawn
+ * beforehand by `buildBasemapStyle`.
+ */
+export function buildFeatures(
   features: GeoJSON.FeatureCollection,
   mode: MapMode = 'play',
 ): StyleSpecification {

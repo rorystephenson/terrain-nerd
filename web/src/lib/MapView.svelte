@@ -15,7 +15,7 @@
     type Rect,
   } from './selection.ts';
   import {
-    buildStyle,
+    buildFeatures,
     firstPickable,
     LAYER_GEOMETRY,
     PICK_LAYERS,
@@ -555,7 +555,7 @@
    *
    * The whole body is untracked, not just the reads that plainly need it.
    * Almost everything touched here is state the map is answerable *to* rather
-   * than built *from* — `buildStyle` reads `indexed`, the opening
+   * than built *from* — `buildFeatures` reads `indexed`, the opening
    * camera reads `bounds`, the leash reads `chrome` — and any one of them left
    * tracked makes the map depend on its own data. Loading a chunk, or the
    * prompt bar growing a line, then tears the map down and constructs a new
@@ -580,7 +580,7 @@
                 bounds,
               )
             : null,
-        style: buildStyle(indexed as GeoJSON.FeatureCollection, mode),
+        style: buildFeatures(indexed as GeoJSON.FeatureCollection, mode),
       };
 
       const instance = new maplibregl.Map({

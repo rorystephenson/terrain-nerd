@@ -6,7 +6,7 @@
  * MapLibre Native's `color-relief` support was still in flight as of December
  * 2025 — but even once it lands, a second engine is a second implementation of
  * shading whose palette was fitted by measurement against a reference render.
- * MapLibre GL JS with the app's own `buildStyle` is the only arrangement where
+ * MapLibre GL JS with the app's own `buildBasemapStyle` is the only arrangement where
  * the tiles are the same picture the app draws rather than a close one.
  *
  * The driver in `render.mjs` calls `renderBlock` once per 4x4 block of tiles.
