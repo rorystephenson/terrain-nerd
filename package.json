@@ -16,7 +16,8 @@
     "test": "npm test -w web",
     "coverage": "vite --config tools/coverage/vite.config.ts",
     "typecheck": "npm run typecheck -w pipeline && npm run check -w web && tsc -p tools/coverage --noEmit",
-    "render:tiles": "vite --config tools/render/vite.config.ts"
+    "render:tiles": "node tools/render/render.mjs",
+    "upload:tiles": "node tools/render/upload.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1125.0",

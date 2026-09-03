@@ -194,13 +194,45 @@ newly covered cell**, with real file sizes fetched by HEAD and cached to disk.
 For the current selection that is 10 extracts and ~5.7 GB, `alps` chosen first.
 
 `extract.ts` downloads each one, clips it with `osmium extract -p` *before*
-filtering, and concatenates the results. Two things bit here. `osmium merge`
+filtering, and concatenates the results. Each clip records the coverage it was
+cut for in a file beside it, because freshness by timestamp alone is wrong here:
+after coverage grew, the downloads had not moved, so every extract already on
+disk was judged up to date, the new ground was never cut out of it, and the run
+looked entirely normal while rebuilding the old pool.
+
+Two more things bit here. `osmium merge`
 refuses extracts built on different days — "Node ID twice in input" — so sources
 are filtered and exported one at a time and deduped by feature id on read, which
 matters because `alps` and `italy` both hold Trentino. And a crashed export once
 left a partial file newer than its inputs, which the next run read as up to date
 and built a pool with 243 mountains and no valleys at all; every layer is now
 written to a temp file and renamed into place.
+
+### Growing the coverage
+
+Five commands, in order, and nothing to clean up by hand:
+
+```bash
+npm run coverage       # click the new squares, Save
+npm run extract:data   # downloads anything new, re-clips, re-filters
+npm run build:data     # chunks, place-name zooms, vector tiles
+npm run render:tiles   # draws the new tiles and the wider ones they invalidate
+npm run upload:tiles   # sends what is new or changed
+```
+
+Every step works out for itself what the change cost it, from the coverage
+rather than from a timestamp: which extracts to re-clip, which tiles to redraw,
+which objects to send. All five are safe to re-run, and three of them do nothing
+at all when nothing changed — `extract:data` and `render:tiles` and
+`upload:tiles` over unchanged coverage are each a few seconds of checking.
+`build:data` is the exception: it rebuilds the pool every time, which is what
+its `--skip-` flags are for.
+
+A coverage change is not incremental in the extracts. Every source is re-clipped
+and every layer re-filtered, because a clip is cut against the whole coverage
+polygon and nothing records which source held which cell. That is minutes rather
+than the hours a re-download would be, and it is the step where being wrong is
+silent, so it errs toward doing the work.
 
 ### Why not Overpass
 
@@ -299,9 +331,10 @@ once, for the whole coverage. Contours are drawn unlabelled for the same reason.
 
 ### Rendering the tiles
 
-`npm run render:tiles` serves the render page and `node tools/render/render.mjs`
-drives it through headless Chrome. It is **MapLibre GL JS, the same renderer the
-app uses, over the same style builder** — which is the whole point. MapLibre
+`npm run render:tiles` draws the pyramid: it starts the render page on its own
+Vite server, drives it through headless Chrome, and shuts the server down after.
+It is **MapLibre GL JS, the same renderer the app uses, over the same style
+builder** — which is the whole point. MapLibre
 Native would be the obvious host, but `color-relief` was still in development
 there as of late 2025, and Martin's renderer handles fill, line and circle only.
 A second implementation's impression of this style is not this style: the
@@ -319,14 +352,30 @@ The capture waits on the map's `idle` event rather than a timeout, because this
 failure mode is quiet: a tile grabbed before the DEM has arrived is blank but
 perfectly well-formed, and looks exactly like a rendered one.
 
-`node tools/render/upload.mjs` puts them in R2 — individual objects rather than
-one archive, because coverage only ever grows, so adding a region uploads its
-own new tiles and nothing else where a single PMTiles archive would be rebuilt
-and re-sent whole. It skips what is already there unless given `--force`, and
-credentials come from `.env`, which is gitignored. `Cache-Control` is a day
-rather than a year: the tiles at a given path are *not* immutable, since a style
-change replaces every one of them in place, and marked immutable they would sit
-in edge caches until something purged them.
+**Growing the coverage redraws what growing it changed, and only that.** The
+tiles carry a `manifest.json` recording the coverage they were drawn for, and
+the next run diffs against it. Skipping a tile because a file exists was not
+good enough: the hatch and the roads and water are painted *into* the image, so
+every wider tile over changed ground is showing the old answer while looking
+perfectly fine. Adding one cell drops six tiles — its ancestors from z9 up to
+z4 — and redraws them; the cell's own z10 and z11 tiles have never been drawn,
+so there is nothing there to be stale. `--force` redraws everything, which is
+what a style change needs. The manifest is written last, and only on a clean
+run, so an interrupt leaves it claiming the old coverage rather than ground that
+was never drawn.
+
+`npm run upload:tiles` puts them in R2 — individual objects rather than one
+archive, because coverage only ever grows, so adding a region uploads its own
+new tiles where a single PMTiles archive would be rebuilt and re-sent whole.
+**What gets sent is decided by content**: R2 returns each object's MD5 as its
+ETag, so a tile goes up when it is new or when its bytes differ, and is skipped
+otherwise. Presence alone was not enough for the same reason as above — a
+redrawn tile keeps its path, so "already there" left the old picture live.
+`--dry-run` says what would go. Credentials come from `.env`, which is
+gitignored. `Cache-Control` is a day rather than a year: the tiles at a given
+path are *not* immutable, since a style change replaces every one of them in
+place, and marked immutable they would sit in edge caches until something
+purged them.
 
 ### The edge of coverage
 
@@ -479,7 +528,7 @@ pipeline/          run on demand, never at build time
   process.ts       GeoJSON-seq -> chunked GeoJSON + index.json
   tiles.ts         the drawn layers -> context.pmtiles     (tippecanoe)
   coastline.ts     ocean polygons from the OSM water shapefile
-  coverage.ts      reading coverage.json, and its rectangles
+  coverage.ts      the clip polygon, the fingerprint, what a change invalidates
   source.ts        streams the extracts, dedupes by id
   normalize.ts     merge same-named segments by proximity
   stitch.ts        join road ways into maximal chains at junctions
@@ -508,8 +557,9 @@ web/src/lib/
 ```
 
 The pure modules hold the logic worth being sure about, and are directly
-unit-tested — including two that live in the pipeline, `placeZoom.ts` and
-`stitch.ts`, tested from here because this is where the test runner is:
+unit-tested — including three that live in the pipeline, `placeZoom.ts`,
+`stitch.ts` and `coverage.ts`, tested from here because this is where the test
+runner is:
 
 ```bash
 npm test             # 139 tests
@@ -532,12 +582,13 @@ npm run typecheck    # pipeline, web and the tools
   and a Val Rendena viewport pulls a few hundred kilobytes across four cells.
   The basemap's 127 MB is not on that server at all — it is in R2, where egress
   is free.
-- **A style change now costs a re-render**, not a page refresh. Changing the
-  palette or a road colour means redrawing the pyramid — six minutes with a warm
-  DEM cache — and re-uploading 127 MB with `--force` before anyone sees it. The
-  palette was fitted by measurement and is settled, so this is an accepted cost
-  rather than a live problem, but it is the one that does not show up in the
-  byte counts.
+- **A style change costs a re-render**, not a page refresh:
+  `npm run render:tiles -- --force`, six minutes with a warm DEM cache, then an
+  upload of whatever actually changed. Coverage changes are incremental;
+  style changes are not, because nothing in a tile's path says which style drew
+  it. The renderer warns when `context.pmtiles` is newer than the tiles, which
+  is the case it can detect. The palette was fitted by measurement and is
+  settled, so this is an accepted cost rather than a live problem.
 - **Green follows elevation, not land cover.** The reference style colours by
   what is actually on the ground, so its treeline bends with aspect and shelter
   while ours is a horizontal band. Fixing that means shipping a landcover layer.

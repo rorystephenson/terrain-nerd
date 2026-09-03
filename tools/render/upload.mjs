@@ -5,12 +5,20 @@
  * adding a region uploads its new tiles and nothing else, where a single archive
  * would have to be rebuilt and re-sent whole every time.
  *
- * Idempotent by listing what is already there and skipping it, so an interrupted
- * run costs nothing to repeat and a coverage change costs only its own tiles.
- * `--force` re-uploads everything, which is what a re-render needs.
+ * What gets sent is decided by content, not by presence. R2 returns each
+ * object's MD5 as its ETag, so a tile is uploaded when it is new or when the
+ * bytes differ and skipped otherwise — an interrupted run costs nothing to
+ * repeat, growing the coverage sends its own tiles plus the wider ones that had
+ * to be redrawn, and a re-render sends exactly what the re-render changed.
+ * Presence alone was not enough: a redrawn tile keeps its path, so skipping
+ * what was already there left the old picture live.
+ *
+ * `--force` sends everything regardless, which should never be needed.
+ * `--dry-run` reports what would go and sends nothing.
  *
  * Credentials come from `.env`, which is gitignored.
  */
+import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -44,6 +52,7 @@ for (const key of ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_
 }
 
 const force = process.argv.includes('--force');
+const dryRun = process.argv.includes('--dry-run');
 const Bucket = env.R2_BUCKET;
 
 const s3 = new S3Client({
@@ -66,16 +75,28 @@ async function localTiles(dir = TILES, prefix = '') {
   return out;
 }
 
+/**
+ * Every object in the bucket, by key, with the MD5 R2 holds for it.
+ *
+ * A multipart upload's ETag is not an MD5 — it carries a `-parts` suffix — so
+ * one of those is reported as unknown and re-sent. Tiles are a hundred
+ * kilobytes and go up in a single PUT, so this does not come up in practice.
+ */
 async function alreadyThere() {
-  const held = new Set();
+  const held = new Map();
   let ContinuationToken;
   do {
     const page = await s3.send(new ListObjectsV2Command({ Bucket, ContinuationToken }));
-    for (const object of page.Contents ?? []) held.add(object.Key);
+    for (const object of page.Contents ?? []) {
+      const etag = (object.ETag ?? '').replaceAll('"', '');
+      held.set(object.Key, etag.includes('-') ? null : etag);
+    }
     ContinuationToken = page.NextContinuationToken;
   } while (ContinuationToken);
   return held;
 }
+
+const md5 = (body) => createHash('md5').update(body).digest('hex');
 
 try {
   await stat(TILES);
@@ -86,15 +107,45 @@ try {
 const tiles = await localTiles();
 console.log(`${tiles.length.toLocaleString()} tiles on disk`);
 
-const held = force ? new Set() : await alreadyThere();
+const held = force ? new Map() : await alreadyThere();
 if (!force) console.log(`${held.size.toLocaleString()} already in ${Bucket}`);
 
-const todo = tiles.filter((t) => !held.has(t.key));
+/*
+ * Hashing reads the whole pyramid, which is a second or two of local disk for
+ * 127 MB and the only way to tell a redrawn tile from an unchanged one. The
+ * bodies are kept for the ones being sent, so nothing is read twice.
+ */
+const todo = [];
+let unchanged = 0;
+let replaced = 0;
+for (const tile of tiles) {
+  const body = await readFile(tile.path);
+  if (!force) {
+    const there = held.get(tile.key);
+    if (there !== undefined && there === md5(body)) {
+      unchanged++;
+      continue;
+    }
+    if (there !== undefined) replaced++;
+  }
+  todo.push({ ...tile, body });
+}
+
 if (todo.length === 0) {
-  console.log('nothing to upload');
+  console.log(`nothing to upload — all ${unchanged.toLocaleString()} tiles match`);
   process.exit(0);
 }
-console.log(`uploading ${todo.length.toLocaleString()}…`);
+console.log(
+  `${dryRun ? 'would upload' : 'uploading'} ${todo.length.toLocaleString()} ` +
+    `(${(todo.length - replaced).toLocaleString()} new, ${replaced.toLocaleString()} changed), ` +
+    `${unchanged.toLocaleString()} unchanged${dryRun ? '' : '…'}`,
+);
+
+if (dryRun) {
+  for (const tile of todo.slice(0, 20)) console.log(`  ${tile.key}`);
+  if (todo.length > 20) console.log(`  …and ${(todo.length - 20).toLocaleString()} more`);
+  process.exit(0);
+}
 
 let done = 0;
 let bytes = 0;
@@ -106,7 +157,7 @@ await Promise.all(
   Array.from({ length: CONCURRENCY }, async () => {
     while (next < todo.length) {
       const tile = todo[next++];
-      const body = await readFile(tile.path);
+      const { body } = tile;
       await s3.send(
         new PutObjectCommand({
           Bucket,
@@ -117,6 +168,8 @@ await Promise.all(
         }),
       );
       bytes += body.length;
+      // Let it go: on a full re-render this array holds the whole pyramid.
+      tile.body = null;
       if (++done % 100 === 0) {
         process.stdout.write(`\r  ${done}/${todo.length}  ${(bytes / 1048576).toFixed(0)} MB   `);
       }

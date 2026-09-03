@@ -23,7 +23,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { coverageBBox, readCoverage, writeCoveragePolygon, type Source } from './coverage.ts';
+import {
+  coverageBBox,
+  coverageHash,
+  readCoverage,
+  writeCoveragePolygon,
+  type Source,
+} from './coverage.ts';
 import { CACHE_DIR } from './paths.ts';
 
 export const OSM_DIR = join(CACHE_DIR, 'osm');
@@ -56,6 +62,8 @@ export const SOURCES: Source[] = coverage?.sources?.length
 
 const downloadOf = (source: Source) => join(OSM_DIR, `${source.id}.osm.pbf`);
 const clippedOf = (source: Source) => join(OSM_DIR, `${source.id}.clipped.osm.pbf`);
+/** Which coverage a clip was cut for, written beside it. */
+const clipStampOf = (source: Source) => `${clippedOf(source)}.coverage`;
 /** What the tag filters read: the clip where there is one, the raw download otherwise. */
 const inputFor = (source: Source) => (coverage ? clippedOf(source) : downloadOf(source));
 
@@ -185,15 +193,26 @@ async function download(source: Source) {
   await run('curl', ['-L', '-C', '-', '--fail', '-o', path, source.pbf]);
 }
 
-/** Cuts an extract down to the covered cells, so the merge stays small. */
-async function clip(source: Source, polygon: string) {
+/**
+ * Cuts an extract down to the covered cells, so the merge stays small.
+ *
+ * Freshness is against the *coverage*, not only against the download. Comparing
+ * mtimes alone reported "clip up to date" for every extract already on disk
+ * after coverage grew — the download had not moved, so the new ground was never
+ * cut out of it, and the run looked entirely normal while rebuilding the old
+ * pool. The fingerprint is written beside the clip, so what a clip was cut for
+ * is recorded rather than inferred.
+ */
+async function clip(source: Source, polygon: string, hash: string) {
   const path = clippedOf(source);
-  if ((await mtime(path)) > (await mtime(downloadOf(source)))) {
+  const cutFor = (await readFile(clipStampOf(source), 'utf8').catch(() => '')).trim();
+  if (cutFor === hash && (await mtime(path)) > (await mtime(downloadOf(source)))) {
     console.log(`  ${source.id}: clip up to date`);
     return;
   }
   console.log(`  ${source.id}: clipping to coverage...`);
   await run('osmium', ['extract', '-p', polygon, '-o', path, '--overwrite', downloadOf(source)]);
+  await writeFile(clipStampOf(source), `${hash}\n`);
 }
 
 async function main() {
@@ -217,7 +236,8 @@ async function main() {
 
     if (coverage) {
       const polygon = await writeCoveragePolygon(coverage);
-      for (const source of SOURCES) await clip(source, polygon);
+      const hash = coverageHash(coverage);
+      for (const source of SOURCES) await clip(source, polygon, hash);
     }
   }
 

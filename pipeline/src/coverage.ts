@@ -9,6 +9,7 @@
  * Absent, it means "no clipping" — the pipeline behaves exactly as it did
  * before coverage existed, which keeps the two changes independent.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -44,6 +45,31 @@ export function readCoverage(): Coverage | null {
   }
 }
 
+/**
+ * A stable fingerprint of the covered ground.
+ *
+ * Everything downstream of coverage — the clipped extracts, the tile pyramid —
+ * is stale when this changes and only when this changes, so the things that
+ * derive from it can tell "still current" from "built for different ground"
+ * without comparing timestamps against a file that did not move.
+ *
+ * Sorted, so the same cells in another order are the same coverage. The zoom is
+ * in it because identical keys at a different zoom are different ground.
+ */
+export function coverageHash(coverage: Coverage): string {
+  return createHash('sha1')
+    .update(`z${coverage.zoom}:${[...coverage.cells].sort().join(',')}`)
+    .digest('hex')
+    .slice(0, 12);
+}
+
+/** A cell key back into its tile column and row. */
+const cellXY = (cell: string): [number, number] => {
+  const match = /^x(-?\d+)y(-?\d+)$/.exec(cell);
+  if (!match) throw new Error(`Not a cell key: ${cell}`);
+  return [Number(match[1]), Number(match[2])];
+};
+
 /** The whole of the covered ground, as one box. */
 export function coverageBBox(coverage: Coverage): BBox {
   const boxes = coverage.cells.map((cell) => bboxOfCell(cell, coverage.zoom));
@@ -68,9 +94,8 @@ export function coverageBBox(coverage: Coverage): BBox {
 export function coverageRects(coverage: Coverage): BBox[] {
   const cells = new Set(coverage.cells);
   const parsed = coverage.cells.map((cell) => {
-    const match = /^x(-?\d+)y(-?\d+)$/.exec(cell);
-    if (!match) throw new Error(`Not a cell key: ${cell}`);
-    return { x: Number(match[1]), y: Number(match[2]) };
+    const [x, y] = cellXY(cell);
+    return { x, y };
   });
 
   // Horizontal runs first.
@@ -108,6 +133,48 @@ export function coverageRects(coverage: Coverage): BBox[] {
     const south = bboxOfCell(`x${x1}y${y1}`, coverage.zoom);
     return [north[0], south[1], south[2], north[3]] as BBox;
   });
+}
+
+/**
+ * The rendered tiles a coverage change makes wrong, as `z/x/y`.
+ *
+ * Not just the new ground's own tiles. The hatch marking uncovered ground is
+ * painted into the image, and so are the roads and water, which exist only
+ * inside the clip — so any tile whose footprint holds a cell that changed is
+ * showing the old answer. Keeping it because a file is there is how widening
+ * the coverage came to leave the old edges drawn at every zoom out.
+ *
+ * Which tiles those are falls out of the grid. At the coverage zoom and deeper,
+ * a tile lies wholly inside one cell: an added cell's tiles do not exist yet,
+ * and a dropped cell's are simply unwanted. Wider than that, one tile spans
+ * many cells, and every one of those over changed ground has to go.
+ */
+export function staleTiles(
+  before: Pick<Coverage, 'cells'>,
+  after: Coverage,
+  minZoom: number,
+  maxZoom: number,
+): string[] {
+  const was = new Set(before.cells);
+  const now = new Set(after.cells);
+  const changed = [...new Set([...was, ...now])].filter((cell) => was.has(cell) !== now.has(cell));
+
+  const stale = new Set<string>();
+  for (const cell of changed) {
+    const [cx, cy] = cellXY(cell);
+    for (let z = minZoom; z < after.zoom && z <= maxZoom; z++) {
+      const span = 2 ** (after.zoom - z);
+      stale.add(`${z}/${Math.floor(cx / span)}/${Math.floor(cy / span)}`);
+    }
+    // Still covered: its own tiles are either already right or not yet drawn.
+    if (now.has(cell)) continue;
+    for (let z = Math.max(after.zoom, minZoom); z <= maxZoom; z++) {
+      const span = 2 ** (z - after.zoom);
+      for (let dx = 0; dx < span; dx++)
+        for (let dy = 0; dy < span; dy++) stale.add(`${z}/${cx * span + dx}/${cy * span + dy}`);
+    }
+  }
+  return [...stale];
 }
 
 const ring = ([w, s, e, n]: BBox) => [[[w, s], [e, s], [e, n], [w, n], [w, s]]];
