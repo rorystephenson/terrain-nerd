@@ -35,6 +35,7 @@ import {
 } from './placeZoom.ts';
 import { readLayer, type RawElement, type RawGeometry } from './source.ts';
 import { simplify } from './simplify.ts';
+import { stitch } from './stitch.ts';
 
 /**
  * Ship cells are z9 tiles — 54 km square, so a builder viewport usually touches
@@ -321,6 +322,50 @@ const countVertices = (shape: Shape): number =>
 type Drawn = { kind: string; class?: string; bbox: BBox; shape: Shape };
 
 /**
+ * The line parts of a geometry, unsimplified and unflattened.
+ *
+ * `element.coords` will not do here: it is every coordinate in order with the
+ * part boundaries lost, so a relation of three separate arcs would arrive as
+ * one line and stitch into a road running between things that never touch.
+ */
+function linesOf(geometry: RawGeometry): LonLat[][] {
+  if (geometry.type === 'LineString') return [geometry.coordinates as unknown as LonLat[]];
+  if (geometry.type === 'MultiLineString') return geometry.coordinates as unknown as LonLat[][];
+  return [];
+}
+
+/**
+ * Stitches raw lines into chains, simplifies each, and emits them.
+ *
+ * Simplification has to come *after* the join: Douglas-Peucker cannot drop
+ * below the two points an OSM fragment is made of, so simplifying first leaves
+ * a road layer that barely shrinks however coarse the tolerance. See
+ * `stitch.ts` — it is worth 3.6x on secondary roads.
+ */
+function drawnLines(
+  raw: Map<string, LonLat[][]>,
+  kind: string,
+  toleranceKm: number,
+): { items: Drawn[]; kept: number } {
+  const items: Drawn[] = [];
+  let kept = 0;
+  for (const [cls, lines] of raw) {
+    for (const chain of stitch(lines)) {
+      const line = simplify(chain, toleranceKm);
+      if (line.length < 2) continue;
+      kept += line.length;
+      items.push({
+        kind,
+        class: cls || undefined,
+        bbox: bboxOf(line),
+        shape: { type: 'MultiLineString', coordinates: [line] },
+      });
+    }
+  }
+  return { items, kept };
+}
+
+/**
  * Writes drawn features as one geometry per kind per cell.
  *
  * OSM splits major roads into half a million short ways, and at a couple of
@@ -371,6 +416,8 @@ async function writeDrawn(dir: string, items: Drawn[]): Promise<Record<string, n
  */
 async function buildWater() {
   const items: Drawn[] = [];
+  /** Raw waterway lines, held unsimplified so they can be stitched first. */
+  const raw = new Map<string, LonLat[][]>();
   let vertices = 0;
   let kept = 0;
   let lakes = 0;
@@ -392,20 +439,35 @@ async function buildWater() {
       if (spanKm < MIN_LAKE_SPAN_KM) continue;
     }
 
+    vertices += element.coords.length;
+
     // A `natural=water` way that is not itself closed is one arc of a
     // multipolygon relation. Closing it on its own would fill a wedge across
     // open water, so it is drawn as a shoreline rather than forced into a shape.
     const shape = toShape(element.geometry, isLake ? SHORE_TOLERANCE_KM : RIVER_TOLERANCE_KM);
-    if (!shape) continue;
+    if (shape?.type === 'MultiPolygon') {
+      kept += countVertices(shape);
+      lakes++;
+      items.push({ kind: 'lake', bbox, shape });
+      continue;
+    }
 
-    vertices += element.coords.length;
-    kept += countVertices(shape);
-    const filled = shape.type === 'MultiPolygon';
-    if (filled) lakes++;
-    else rivers++;
-
-    items.push({ kind: filled ? 'lake' : 'river', bbox, shape });
+    const parts = linesOf(element.geometry);
+    if (parts.length === 0) continue;
+    rivers++;
+    const held = raw.get('');
+    if (held) held.push(...parts);
+    else raw.set('', [...parts]);
   }
+
+  const joined = drawnLines(raw, 'river', RIVER_TOLERANCE_KM);
+  // Appended one at a time: spreading a few hundred thousand arguments into
+  // `push` overflows the stack.
+  for (const item of joined.items) items.push(item);
+  kept += joined.kept;
+  console.log(
+    `    waterways: ${rivers.toLocaleString()} ways -> ${joined.items.length.toLocaleString()} stitched lines`,
+  );
 
   const cells = await writeDrawn('water', items);
   console.log(
@@ -425,6 +487,8 @@ async function buildWater() {
  */
 async function buildContext() {
   const items: Drawn[] = [];
+  /** Raw road lines by class, held unsimplified so they can be stitched first. */
+  const raw = new Map<string, LonLat[][]>();
   let vertices = 0;
   let kept = 0;
   let roads = 0;
@@ -447,24 +511,44 @@ async function buildContext() {
       if (spanKm < MIN_GLACIER_SPAN_KM) continue;
     }
 
-    const shape = toShape(element.geometry, isGlacier ? SHORE_TOLERANCE_KM : ROAD_TOLERANCE_KM);
-    if (!shape) continue;
-    // An unclosed glacier arc is half a relation; drawing it as a line would
-    // put a stray stroke across the ice, so it is dropped.
-    if (isGlacier && shape.type !== 'MultiPolygon') continue;
-
     vertices += element.coords.length;
-    kept += countVertices(shape);
-    if (isGlacier) glaciers++;
-    else roads++;
 
-    items.push({
-      kind: isGlacier ? 'glacier' : 'road',
-      class: isGlacier ? undefined : element.tags.highway?.replace(/_link$/, ''),
-      bbox,
-      shape,
-    });
+    if (isGlacier) {
+      const shape = toShape(element.geometry, SHORE_TOLERANCE_KM);
+      // An unclosed glacier arc is half a relation; drawing it as a line would
+      // put a stray stroke across the ice, so it is dropped.
+      if (!shape || shape.type !== 'MultiPolygon') continue;
+      kept += countVertices(shape);
+      glaciers++;
+      items.push({ kind: 'glacier', bbox, shape });
+      continue;
+    }
+
+    const cls = element.tags.highway?.replace(/_link$/, '') ?? '';
+    const parts = linesOf(element.geometry);
+    if (parts.length === 0) {
+      // A road mapped as an area — a pedestrian square. Nothing to join it to.
+      const shape = toShape(element.geometry, ROAD_TOLERANCE_KM);
+      if (!shape) continue;
+      kept += countVertices(shape);
+      roads++;
+      items.push({ kind: 'road', class: cls || undefined, bbox, shape });
+      continue;
+    }
+    roads++;
+    const held = raw.get(cls);
+    if (held) held.push(...parts);
+    else raw.set(cls, [...parts]);
   }
+
+  const joined = drawnLines(raw, 'road', ROAD_TOLERANCE_KM);
+  // Appended one at a time: spreading a few hundred thousand arguments into
+  // `push` overflows the stack.
+  for (const item of joined.items) items.push(item);
+  kept += joined.kept;
+  console.log(
+    `    roads: ${roads.toLocaleString()} ways -> ${joined.items.length.toLocaleString()} stitched lines`,
+  );
 
   const cells = await writeDrawn('context', items);
   console.log(
