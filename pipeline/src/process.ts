@@ -38,6 +38,7 @@ import {
 import { readLayer, type RawElement, type RawGeometry } from './source.ts';
 import { simplify } from './simplify.ts';
 import { stitch } from './stitch.ts';
+import { buildTiles, type TileFeature } from './tiles.ts';
 
 /**
  * Ship cells are z9 tiles — 54 km square, so a builder viewport usually touches
@@ -492,6 +493,7 @@ async function buildWater() {
     `    waterways: ${rivers.toLocaleString()} ways -> ${joined.items.length.toLocaleString()} stitched lines`,
   );
 
+  for (const item of items) drawn.push(item);
   const cells = await writeDrawn('water', items);
   console.log(
     `  Water: ${lakes.toLocaleString()} lakes + ${rivers.toLocaleString()} waterways ` +
@@ -574,6 +576,7 @@ async function buildContext() {
     `    roads: ${roads.toLocaleString()} ways -> ${joined.items.length.toLocaleString()} stitched lines`,
   );
 
+  for (const item of items) drawn.push(item);
   const cells = await writeDrawn('context', items);
   console.log(
     `  Context: ${roads.toLocaleString()} roads + ${glaciers.toLocaleString()} glaciers ` +
@@ -610,6 +613,9 @@ function readExisting(dir_: string): { count: number; cells: Record<string, numb
   }
 }
 
+/** Everything the basemap draws, gathered for the tile build. */
+const drawn: TileFeature[] = [];
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -625,6 +631,18 @@ async function main() {
   const context = values['skip-context'] ? readExisting('context') : await buildContext();
   // Water is the slowest layer by far; `--skip-water` reuses what is on disk.
   const water = values['skip-water'] ? readExisting('water') : await buildWater();
+
+  /*
+   * Tiles come last, from everything the two layers drew. Skipping either layer
+   * would tile only half the basemap, so the archive is only rebuilt when both
+   * have actually run.
+   */
+  if (!values['skip-context'] && !values['skip-water']) {
+    const bytes = await buildTiles(drawn);
+    console.log(`  Tiles: ${(bytes / 1048576).toFixed(1)} MB from ${drawn.length.toLocaleString()} features`);
+  } else {
+    console.log('  Tiles: skipped (needs both context and water)');
+  }
 
   await writeJson('index.json', {
     generatedAt: new Date().toISOString().slice(0, 10),
