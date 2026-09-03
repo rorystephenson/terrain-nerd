@@ -193,6 +193,14 @@ Regierungsbezirke. So the pick is a greedy set cover weighted by **bytes per
 newly covered cell**, with real file sizes fetched by HEAD and cached to disk.
 For the current selection that is 10 extracts and ~5.7 GB, `alps` chosen first.
 
+**What is already downloaded is free**, and the tool says so as it goes. Without
+that the cover re-optimises from scratch on every edit, and it is unstable in an
+expensive direction: adding twelve cells in southern Italy dropped the 2 GB
+`italy` extract already on disk for five Italian sub-regions, each cheaper per
+*new* cell — 1.7 GB of download to reach ground the file already held. Bytes on
+disk are bytes already paid for, so adding cells inside ground you have costs no
+download at all. Delete an extract and the choice reverts to cheapest.
+
 `extract.ts` downloads each one, clips it with `osmium extract -p` *before*
 filtering, and concatenates the results. Each clip records the coverage it was
 cut for in a file beside it, because freshness by timestamp alone is wrong here:
@@ -232,7 +240,10 @@ A coverage change is not incremental in the extracts. Every source is re-clipped
 and every layer re-filtered, because a clip is cut against the whole coverage
 polygon and nothing records which source held which cell. That is minutes rather
 than the hours a re-download would be, and it is the step where being wrong is
-silent, so it errs toward doing the work.
+silent, so it errs toward doing the work. What it does *not* do is re-download:
+extracts are fetched under a `.part` name and renamed on success, so a file that
+is there is a whole file, and new ground inside an extract you already hold
+costs no network at all.
 
 ### Why not Overpass
 

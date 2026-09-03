@@ -289,6 +289,7 @@
     "x543y370",
     "x543y371",
     "x543y372",
+    "x543y373",
     "x543y374",
     "x544y356",
     "x544y357",
@@ -323,6 +324,7 @@
     "x545y373",
     "x545y374",
     "x545y375",
+    "x545y376",
     "x546y356",
     "x546y357",
     "x546y358",
@@ -337,6 +339,7 @@
     "x546y373",
     "x546y374",
     "x546y375",
+    "x546y376",
     "x546y377",
     "x546y378",
     "x547y356",
@@ -443,6 +446,7 @@
     "x552y365",
     "x552y366",
     "x552y367",
+    "x552y380",
     "x552y381",
     "x552y382",
     "x552y383",
@@ -480,6 +484,9 @@
     "x554y364",
     "x554y365",
     "x554y381",
+    "x554y383",
+    "x554y384",
+    "x554y385",
     "x554y386",
     "x554y394",
     "x554y395",
@@ -497,6 +504,7 @@
     "x555y365",
     "x555y383",
     "x555y384",
+    "x555y385",
     "x555y386",
     "x555y395",
     "x556y355",
@@ -511,6 +519,8 @@
     "x556y384",
     "x556y385",
     "x556y386",
+    "x556y387",
+    "x556y388",
     "x557y356",
     "x557y357",
     "x557y358",
@@ -520,6 +530,8 @@
     "x557y363",
     "x557y364",
     "x557y386",
+    "x557y387",
+    "x557y388",
     "x557y392",
     "x558y357",
     "x558y358",
@@ -531,14 +543,9 @@
   ],
   "sources": [
     {
-      "id": "corse",
-      "name": "Corse",
-      "pbf": "https://download.geofabrik.de/europe/france/corse-latest.osm.pbf"
-    },
-    {
-      "id": "franche-comte",
-      "name": "Franche Comte",
-      "pbf": "https://download.geofabrik.de/europe/france/franche-comte-latest.osm.pbf"
+      "id": "alps",
+      "name": "Alps",
+      "pbf": "https://download.geofabrik.de/europe/alps-latest.osm.pbf"
     },
     {
       "id": "italy",
@@ -546,9 +553,9 @@
       "pbf": "https://download.geofabrik.de/europe/italy-latest.osm.pbf"
     },
     {
-      "id": "alps",
-      "name": "Alps",
-      "pbf": "https://download.geofabrik.de/europe/alps-latest.osm.pbf"
+      "id": "franche-comte",
+      "name": "Franche Comte",
+      "pbf": "https://download.geofabrik.de/europe/france/franche-comte-latest.osm.pbf"
     },
     {
       "id": "freiburg-regbez",
@@ -556,19 +563,9 @@
       "pbf": "https://download.geofabrik.de/europe/germany/baden-wuerttemberg/freiburg-regbez-latest.osm.pbf"
     },
     {
-      "id": "tuebingen-regbez",
-      "name": "Regierungsbezirk Tübingen",
-      "pbf": "https://download.geofabrik.de/europe/germany/baden-wuerttemberg/tuebingen-regbez-latest.osm.pbf"
-    },
-    {
-      "id": "croatia",
-      "name": "Croatia",
-      "pbf": "https://download.geofabrik.de/europe/croatia-latest.osm.pbf"
-    },
-    {
-      "id": "schwaben",
-      "name": "Schwaben",
-      "pbf": "https://download.geofabrik.de/europe/germany/bayern/schwaben-latest.osm.pbf"
+      "id": "switzerland",
+      "name": "Switzerland",
+      "pbf": "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf"
     },
     {
       "id": "slovenia",
@@ -576,9 +573,24 @@
       "pbf": "https://download.geofabrik.de/europe/slovenia-latest.osm.pbf"
     },
     {
-      "id": "switzerland",
-      "name": "Switzerland",
-      "pbf": "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf"
+      "id": "croatia",
+      "name": "Croatia",
+      "pbf": "https://download.geofabrik.de/europe/croatia-latest.osm.pbf"
+    },
+    {
+      "id": "tuebingen-regbez",
+      "name": "Regierungsbezirk Tübingen",
+      "pbf": "https://download.geofabrik.de/europe/germany/baden-wuerttemberg/tuebingen-regbez-latest.osm.pbf"
+    },
+    {
+      "id": "corse",
+      "name": "Corse",
+      "pbf": "https://download.geofabrik.de/europe/france/corse-latest.osm.pbf"
+    },
+    {
+      "id": "schwaben",
+      "name": "Schwaben",
+      "pbf": "https://download.geofabrik.de/europe/germany/bayern/schwaben-latest.osm.pbf"
     }
   ]
 }

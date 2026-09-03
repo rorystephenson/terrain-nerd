@@ -182,6 +182,11 @@ async function extractLayer(layer: LayerId, force: boolean) {
  * Through curl rather than `fetch` because these run to gigabytes over a free
  * service, and `-C -` picking up where a dropped connection left off is worth
  * more here than avoiding a subprocess.
+ *
+ * Downloaded under `.part` and renamed on success, so a name that exists always
+ * means a whole file. Writing straight to the final name made an interrupted
+ * download indistinguishable from a finished one — the next run saw a file,
+ * said "already downloaded", and filtered a truncated extract.
  */
 async function download(source: Source) {
   const path = downloadOf(source);
@@ -189,8 +194,12 @@ async function download(source: Source) {
     console.log(`  ${source.id}: already downloaded`);
     return;
   }
-  console.log(`  ${source.id}: downloading ${source.pbf}`);
-  await run('curl', ['-L', '-C', '-', '--fail', '-o', path, source.pbf]);
+  const partial = `${path}.part`;
+  console.log(
+    `  ${source.id}: ${(await mtime(partial)) > 0 ? 'resuming' : 'downloading'} ${source.pbf}`,
+  );
+  await run('curl', ['-L', '-C', '-', '--fail', '-o', partial, source.pbf]);
+  await rename(partial, path);
 }
 
 /**

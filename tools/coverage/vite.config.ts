@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
@@ -7,6 +7,7 @@ const COVERAGE = resolve(repo, 'pipeline/coverage.json');
 const GEOFABRIK_CACHE = resolve(repo, 'pipeline/cache/geofabrik-index.json');
 const GEOFABRIK_URL = 'https://download.geofabrik.de/index-v1.json';
 const SIZES_CACHE = resolve(repo, 'pipeline/cache/geofabrik-sizes.json');
+const OSM_DIR = resolve(repo, 'pipeline/cache/osm');
 
 const body = async (request: { on: (e: string, f: (c: unknown) => void) => void }) =>
   new Promise<string>((done) => {
@@ -86,6 +87,26 @@ function coverageApi(): Plugin {
 
         response.setHeader('content-type', 'application/json');
         response.end(JSON.stringify(Object.fromEntries(urls.map((u) => [u, held[u]]))));
+      });
+
+      /*
+       * Which extracts are already downloaded.
+       *
+       * Bytes on disk are bytes already paid for, and without this the cover
+       * re-optimises from scratch every time: adding a dozen cells in southern
+       * Italy swapped the 2 GB `italy` extract already held for five Italian
+       * sub-regions, because each of those costs less per *new* cell. That is
+       * 1.7 GB of download to cover ground the existing file already reached.
+       */
+      server.middlewares.use('/api/downloaded', async (_request, response) => {
+        const files = await readdir(OSM_DIR).catch(() => [] as string[]);
+        const ids = files
+          .filter((name) => name.endsWith('.osm.pbf') && !name.includes('.clipped.'))
+          .map((name) => name.replace('.osm.pbf', ''))
+          // Layer working files are `<layer>.<source>.osm.pbf`; a source id has no dot.
+          .filter((id) => !id.includes('.'));
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify(ids));
       });
 
       // Cached on disk: 555 regions of polygon, and the tool asks on every edit.

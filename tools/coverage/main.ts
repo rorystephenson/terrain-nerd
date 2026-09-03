@@ -325,6 +325,15 @@ let chosen: { id: string; name: string; pbf: string }[] = [];
  * Greedy on bytes-per-new-cell instead, which picks `alps` first and lands on
  * 10 downloads for 5.7 GB over the same ground. Sizes come from the dev server,
  * since a browser cannot ask Geofabrik for them across origins.
+ *
+ * **What is already downloaded is free.** Without that the cover re-optimises
+ * from scratch on every edit, and the answer is unstable in an expensive
+ * direction: adding twelve cells in southern Italy dropped the 2 GB `italy`
+ * extract already on disk in favour of five Italian sub-regions, because each
+ * costs less per new cell — 1.7 GB of download to reach ground the file already
+ * held. Bytes on disk are bytes already paid for, so they cost nothing here,
+ * and adding cells inside ground already downloaded now costs no download at
+ * all. Delete an extract and the choice reverts to cheapest.
  */
 async function showRegions() {
   const list = document.getElementById('regions')!;
@@ -378,6 +387,12 @@ async function showRegions() {
   }
 
   list.innerHTML = '<li>Measuring downloads…</li>';
+  let held: Set<string>;
+  try {
+    held = new Set((await (await fetch('/api/downloaded')).json()) as string[]);
+  } catch {
+    held = new Set();
+  }
   let sizes: Record<string, number>;
   try {
     const response = await fetch('/api/pbf-sizes', {
@@ -401,8 +416,10 @@ async function showRegions() {
       const gained = [...candidate.cells].filter((i) => left.has(i)).length;
       const bytes = sizes[candidate.region.pbf];
       if (!gained || !bytes) continue;
-      const cost = bytes / gained;
-      if (cost < bestCost) {
+      const cost = held.has(candidate.region.id) ? 0 : bytes / gained;
+      // Ties are all the free ones: take whichever reaches furthest, so a
+      // selection inside downloaded ground settles in as few picks as it can.
+      if (cost < bestCost || (cost === bestCost && gained > bestNew)) {
         bestCost = cost;
         best = candidate;
         bestNew = gained;
@@ -415,19 +432,32 @@ async function showRegions() {
 
   chosen = picked.map(({ region }) => ({ id: region.id, name: region.name, pbf: region.pbf }));
 
+  /*
+   * The running total that matters is what this selection would *fetch*, not
+   * what it adds up to — most of the time the answer should be nothing, and a
+   * number that only ever grows cannot show you that.
+   */
   let running = 0;
   const mb = (bytes: number) => `${Math.round(bytes / 1048576)} MB`;
+  const toFetch = picked.filter(({ region }) => !held.has(region.id));
   list.innerHTML =
     picked
       .map(({ region, cells: n, bytes }) => {
-        running += bytes;
+        const have = held.has(region.id);
+        if (!have) running += bytes;
         return (
-          `<li><strong>${region.name}</strong><br />` +
-          `<small>${n} cells · ${mb(bytes)} · running total ` +
-          `${(running / 1073741824).toFixed(2)} GB</small></li>`
+          `<li><strong>${region.name}</strong>${have ? ' <small>· on disk</small>' : ''}<br />` +
+          `<small>${n} cells · ${mb(bytes)}` +
+          (have ? '' : ` · to fetch ${(running / 1073741824).toFixed(2)} GB`) +
+          `</small></li>`
         );
       })
-      .join('') + (left.size ? `<li><em>${left.size} cells unmatched</em></li>` : '');
+      .join('') +
+    `<li><em>${
+      toFetch.length
+        ? `${toFetch.length} to download, ${mb(toFetch.reduce((sum, p) => sum + p.bytes, 0))}`
+        : 'nothing to download'
+    }${left.size ? `; ${left.size} cells unmatched` : ''}</em></li>`;
 }
 
 function containsPoint(region: Region, point: [number, number]): boolean {
