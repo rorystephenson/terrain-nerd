@@ -1,30 +1,63 @@
 /**
- * Pulls the raw feature pool for Italy out of a Geofabrik extract.
+ * Pulls the raw feature pool out of Geofabrik extracts.
  *
  * This replaced a chunked Overpass download. The public endpoint handles small
  * queries fine but falls over above a certain query weight — a 2° cell asking
  * for way geometry reliably drew connection resets — and a country-sized pull
- * meant hours of requests hostage to a free service. A regional extract is one
- * resumable download, filtered locally in about a minute, and re-filtering
+ * meant hours of requests hostage to a free service. Regional extracts are
+ * resumable downloads, filtered locally in about a minute, and re-filtering
  * costs no network at all.
+ *
+ * Which extracts is decided by coverage: `tools/coverage` works out the
+ * cheapest set that reaches every chosen cell, so ground nobody flies is never
+ * downloaded rather than downloaded and thrown away. Each is clipped to the
+ * coverage polygon on arrival — Italy alone drops from 2.07 GB to 1.20 GB —
+ * and the clipped pieces merged, which also removes the overlap between
+ * extracts that cover the same border twice.
  *
  * Writes only to `cache/osm/`. Interpreting the result is `process.ts`'s job.
  */
 import { spawn } from 'node:child_process';
-import { mkdir, stat } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
+import { coverageBBox, readCoverage, writeCoveragePolygon, type Source } from './coverage.ts';
 import { CACHE_DIR } from './paths.ts';
 
 export const OSM_DIR = join(CACHE_DIR, 'osm');
 
-export const SOURCE_URL = 'https://download.geofabrik.de/europe/italy-latest.osm.pbf';
+/** Where the pool comes from when no coverage has been chosen. */
+const DEFAULT_SOURCE: Source = {
+  id: 'italy',
+  name: 'Italy',
+  pbf: 'https://download.geofabrik.de/europe/italy-latest.osm.pbf',
+};
+/** The ground the default source covers, give or take: Italy plus its borders. */
+const DEFAULT_COVERAGE: [number, number, number, number] = [6.5, 35, 19, 47.5];
 
-/** What the extract covers, give or take: Italy plus its border terrain. */
-export const COVERAGE: [number, number, number, number] = [6.5, 35, 19, 47.5];
-export const SOURCE_PBF = join(OSM_DIR, 'italy-latest.osm.pbf');
+const coverage = readCoverage();
+
+/**
+ * What the pool covers.
+ *
+ * From `coverage.json` when there is one — the tiles chosen in `tools/coverage`
+ * — and otherwise the whole of the default extract, which is how this behaved
+ * before coverage existed.
+ */
+export const COVERAGE: [number, number, number, number] = coverage
+  ? coverageBBox(coverage)
+  : DEFAULT_COVERAGE;
+
+export const SOURCES: Source[] = coverage?.sources?.length
+  ? coverage.sources
+  : [DEFAULT_SOURCE];
+
+const downloadOf = (source: Source) => join(OSM_DIR, `${source.id}.osm.pbf`);
+const clippedOf = (source: Source) => join(OSM_DIR, `${source.id}.clipped.osm.pbf`);
+/** What the tag filters read: the clip where there is one, the raw download otherwise. */
+const inputFor = (source: Source) => (coverage ? clippedOf(source) : downloadOf(source));
 
 /**
  * What each layer keeps, in osmium's `type/key=value` filter syntax.
@@ -78,33 +111,89 @@ const mtime = async (path: string): Promise<number> => {
   }
 };
 
+/**
+ * Filters and exports one layer, source by source.
+ *
+ * The sources are deliberately *not* merged into one PBF first, which was the
+ * obvious thing to try. `osmium merge` keeps objects that differ only by
+ * version, and Geofabrik builds each extract on its own schedule — so a node
+ * edited between the `alps` and `italy` snapshots exists at two versions,
+ * survives the merge, and makes `osmium export` refuse the whole file with
+ * "Node ID twice in input".
+ *
+ * Exporting each source on its own and concatenating sidesteps it. The overlap
+ * between extracts then arrives as repeated features rather than a broken file,
+ * and `source.ts` drops them by id on the way in.
+ */
 async function extractLayer(layer: LayerId, force: boolean) {
-  const filtered = join(OSM_DIR, `${layer}.osm.pbf`);
   const exported = layerFile(layer);
+  const newest = Math.max(...(await Promise.all(SOURCES.map((s) => mtime(inputFor(s))))));
 
-  if (!force && (await mtime(exported)) > (await mtime(SOURCE_PBF))) {
+  if (!force && (await mtime(exported)) > newest) {
     console.log(`  ${layer}: up to date`);
     return;
   }
 
-  console.log(`  ${layer}: filtering...`);
-  await run('osmium', [
-    'tags-filter', SOURCE_PBF, ...LAYERS[layer],
-    '-o', filtered, '--overwrite',
-  ]);
+  const parts: string[] = [];
+  for (const source of SOURCES) {
+    const filtered = join(OSM_DIR, `${layer}.${source.id}.osm.pbf`);
+    const part = join(OSM_DIR, `${layer}.${source.id}.geojsonseq`);
+    process.stdout.write(`  ${layer}: ${source.id}...\n`);
+    await run('osmium', ['tags-filter', inputFor(source), ...LAYERS[layer],
+      '-o', filtered, '--overwrite']);
+    // GeoJSON-seq is one feature per line, so process.ts can stream it rather
+    // than holding a country's worth of parsed JSON at once.
+    await run('osmium', ['export', filtered, '-f', 'geojsonseq',
+      '--add-unique-id=type_id', '-o', part, '--overwrite']);
+    await rm(filtered, { force: true });
+    parts.push(part);
+  }
 
-  // GeoJSON-seq is one feature per line, so process.ts can stream it rather
-  // than holding a country's worth of parsed JSON at once.
-  console.log(`  ${layer}: exporting geometry...`);
-  await run('osmium', [
-    'export', filtered,
-    '-f', 'geojsonseq',
-    '--add-unique-id=type_id',
-    '-o', exported, '--overwrite',
-  ]);
+  /*
+   * Assembled under a temporary name and renamed at the end, so an interrupted
+   * run leaves no output rather than a plausible-looking short one. The first
+   * version wrote straight to `exported`; a crash mid-export left 672 of 119,210
+   * elements on disk, newer than its own inputs, and the next run skipped the
+   * layer as up to date and built a pool with almost no mountains in it.
+   */
+  const partial = `${exported}.partial`;
+  await writeFile(partial, '');
+  for (const part of parts) {
+    await appendFile(partial, await readFile(part));
+    await rm(part, { force: true });
+  }
+  await rename(partial, exported);
 
   const size = (await stat(exported)).size;
   console.log(`  ${layer}: ${(size / 1048576).toFixed(0)} MB`);
+}
+
+/**
+ * Fetches one extract, resuming a part-finished file.
+ *
+ * Through curl rather than `fetch` because these run to gigabytes over a free
+ * service, and `-C -` picking up where a dropped connection left off is worth
+ * more here than avoiding a subprocess.
+ */
+async function download(source: Source) {
+  const path = downloadOf(source);
+  if ((await mtime(path)) > 0) {
+    console.log(`  ${source.id}: already downloaded`);
+    return;
+  }
+  console.log(`  ${source.id}: downloading ${source.pbf}`);
+  await run('curl', ['-L', '-C', '-', '--fail', '-o', path, source.pbf]);
+}
+
+/** Cuts an extract down to the covered cells, so the merge stays small. */
+async function clip(source: Source, polygon: string) {
+  const path = clippedOf(source);
+  if ((await mtime(path)) > (await mtime(downloadOf(source)))) {
+    console.log(`  ${source.id}: clip up to date`);
+    return;
+  }
+  console.log(`  ${source.id}: clipping to coverage...`);
+  await run('osmium', ['extract', '-p', polygon, '-o', path, '--overwrite', downloadOf(source)]);
 }
 
 async function main() {
@@ -112,19 +201,34 @@ async function main() {
     options: {
       layer: { type: 'string' },
       force: { type: 'boolean', default: false },
+      'skip-fetch': { type: 'boolean', default: false },
     },
   });
 
   await mkdir(OSM_DIR, { recursive: true });
-  if ((await mtime(SOURCE_PBF)) === 0) {
-    throw new Error(
-      `Missing ${SOURCE_PBF}\n  Download it with:\n` +
-        `  curl -L -C - -o ${SOURCE_PBF} ${SOURCE_URL}`,
+
+  if (!values['skip-fetch']) {
+    console.log(
+      coverage
+        ? `Coverage: ${coverage.cells.length} cells, ${SOURCES.length} extracts`
+        : 'No coverage.json — using the whole default extract',
     );
+    for (const source of SOURCES) await download(source);
+
+    if (coverage) {
+      const polygon = await writeCoveragePolygon(coverage);
+      for (const source of SOURCES) await clip(source, polygon);
+    }
+  }
+
+  for (const source of SOURCES) {
+    if ((await mtime(inputFor(source))) === 0) {
+      throw new Error(`Missing ${inputFor(source)} — run without --skip-fetch first.`);
+    }
   }
 
   const layers = (values.layer ? values.layer.split(',') : Object.keys(LAYERS)) as LayerId[];
-  console.log(`Extracting ${layers.join(', ')} from ${SOURCE_PBF}`);
+  console.log(`Extracting ${layers.join(', ')} from ${SOURCES.length} source(s)`);
   for (const layer of layers) await extractLayer(layer, values.force!);
 }
 

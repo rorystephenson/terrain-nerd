@@ -55,9 +55,23 @@ function flatten(coordinates: unknown, into: LonLat[]): void {
 /** GeoJSON-seq permits an ASCII record separator in front of each record. */
 const RECORD_SEPARATOR = new RegExp('^\\x1e');
 
+/**
+ * Streams a layer, giving each element once.
+ *
+ * The dedupe is not defensive tidying — it is load-bearing. Coverage is met by
+ * whichever set of Geofabrik extracts is cheapest, and those overlap freely:
+ * `alps` and `italy` both hold Trentino, so every Trentino peak is exported
+ * twice. Left in, the quiz would ask about the same summit two questions
+ * running and the builder would count it twice.
+ *
+ * By id rather than by geometry, because the same OSM object may arrive with
+ * different versions from extracts built on different days — the ids match even
+ * when a node has moved a metre between snapshots.
+ */
 export async function* readLayer(layer: LayerId): AsyncGenerator<RawElement> {
   const stream = createReadStream(layerFile(layer), { encoding: 'utf8' });
   const lines = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
+  const seen = new Set<string>();
 
   for await (const line of lines) {
     const trimmed = line.replace(RECORD_SEPARATOR, '').trim();
@@ -72,6 +86,8 @@ export async function* readLayer(layer: LayerId): AsyncGenerator<RawElement> {
 
     const geometry = feature.geometry;
     if (!geometry || !feature.id) continue;
+    if (seen.has(feature.id)) continue;
+    seen.add(feature.id);
 
     const coords: LonLat[] = [];
     flatten(geometry.coordinates, coords);

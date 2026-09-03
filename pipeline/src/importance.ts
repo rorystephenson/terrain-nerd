@@ -101,6 +101,11 @@ export async function fetchSitelinks(ids: string[], cacheKey: string): Promise<M
       try {
         const response = await fetch(url, {
           headers: { 'User-Agent': 'terrain-nerd/0.1 (data pipeline)' },
+          // Node's fetch has no default timeout, so a connection the server
+          // accepts and then abandons hangs for ever — and the retry below
+          // never fires, because the attempt never finishes. A build once sat
+          // on one of these for twelve hours having used six seconds of CPU.
+          signal: AbortSignal.timeout(20000),
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const body = (await response.json()) as {
