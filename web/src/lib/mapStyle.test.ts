@@ -63,6 +63,12 @@ test('water is drawn from the context source, rivers beneath lakes', () => {
   // the other way round a blue line runs down the middle of Garda.
   const order = style.layers.map((l) => l.id);
   assert.ok(order.indexOf('rivers') < order.indexOf('lakes'), 'rivers under lakes');
+  // The sea goes beneath both, so a coastal lagoon and a river running to its
+  // mouth stay drawn rather than being painted over by the water around them.
+  assert.ok(order.indexOf('ocean') < order.indexOf('rivers'), 'sea under rivers');
+  // And above the shading, because a sea surface is flat — the same reason
+  // lakes sit there, and the reason glaciers deliberately do not.
+  assert.ok(order.indexOf('hillshade') < order.indexOf('ocean'), 'sea above the hillshade');
 });
 
 test('the basemap needs no source but elevation and our own context', () => {

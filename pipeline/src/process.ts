@@ -11,6 +11,8 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
+import { readOcean } from './coastline.ts';
+import { coverageRects, readCoverage } from './coverage.ts';
 import { COVERAGE } from './extract.ts';
 import {
   classify,
@@ -460,6 +462,27 @@ async function buildWater() {
     else raw.set('', [...parts]);
   }
 
+  /*
+   * The sea, from the prebuilt coastline polygons. Drawn with the lakes and for
+   * the same reason: a sea surface is flat, so it sits above the hillshade
+   * rather than taking its shading. Without it the Mediterranean renders as the
+   * pale bottom of the elevation ramp — the same colour as a valley floor, with
+   * submarine relief showing through it.
+   */
+  const coverage = readCoverage();
+  let ocean = 0;
+  for (const piece of await readOcean(coverage ? coverageRects(coverage) : [COVERAGE])) {
+    const shape = toShape(
+      { type: 'MultiPolygon', coordinates: piece.rings as unknown as never },
+      SHORE_TOLERANCE_KM,
+    );
+    if (!shape || shape.type !== 'MultiPolygon') continue;
+    vertices += piece.rings.flat(2).length;
+    kept += countVertices(shape);
+    ocean++;
+    items.push({ kind: 'ocean', bbox: piece.bbox, shape });
+  }
+
   const joined = drawnLines(raw, 'river', RIVER_TOLERANCE_KM);
   // Appended one at a time: spreading a few hundred thousand arguments into
   // `push` overflows the stack.
@@ -472,6 +495,7 @@ async function buildWater() {
   const cells = await writeDrawn('water', items);
   console.log(
     `  Water: ${lakes.toLocaleString()} lakes + ${rivers.toLocaleString()} waterways ` +
+      `+ ${ocean.toLocaleString()} sea ` +
       `across ${Object.keys(cells).length} cells ` +
       `(${vertices.toLocaleString()} vertices -> ${kept.toLocaleString()})`,
   );

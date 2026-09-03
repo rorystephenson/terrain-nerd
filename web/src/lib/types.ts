@@ -49,7 +49,7 @@ export type ContextCollection = {
   features: {
     type: 'Feature';
     geometry: GeoJSON.Geometry;
-    properties: { kind: 'road' | 'glacier' | 'lake' | 'river'; class?: string };
+    properties: { kind: 'road' | 'glacier' | 'lake' | 'river' | 'ocean'; class?: string };
   }[];
 };
 

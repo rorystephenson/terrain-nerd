@@ -367,6 +367,22 @@ export function buildStyle(
         },
       },
       {
+        /*
+         * The sea, under the lakes and rivers because a coastal river should
+         * run to its mouth over open water rather than stop at the shore.
+         *
+         * It is drawn at all because there used to be none: with no coastline
+         * in the data, `color-relief` clamped the Mediterranean to the bottom
+         * of the elevation ramp and painted it the same near-white as a valley
+         * floor, with the sea bed's relief showing through as hillshade.
+         */
+        id: 'ocean',
+        type: 'fill',
+        source: 'context',
+        filter: ['==', ['get', 'kind'], 'ocean'],
+        paint: { 'fill-color': '#9ec6df', 'fill-opacity': 1 },
+      },
+      {
         id: 'rivers',
         type: 'line',
         source: 'context',
