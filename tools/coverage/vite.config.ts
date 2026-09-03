@@ -6,6 +6,7 @@ const repo = resolve(import.meta.dirname, '../..');
 const COVERAGE = resolve(repo, 'pipeline/coverage.json');
 const GEOFABRIK_CACHE = resolve(repo, 'pipeline/cache/geofabrik-index.json');
 const GEOFABRIK_URL = 'https://download.geofabrik.de/index-v1.json';
+const SIZES_CACHE = resolve(repo, 'pipeline/cache/geofabrik-sizes.json');
 
 const body = async (request: { on: (e: string, f: (c: unknown) => void) => void }) =>
   new Promise<string>((done) => {
@@ -45,6 +46,46 @@ function coverageApi(): Plugin {
           return response.end('ok');
         }
         next();
+      });
+
+      /*
+       * How big each extract's download is.
+       *
+       * Node-side because a browser cannot HEAD download.geofabrik.de across
+       * origins, and cached because these are hundreds of requests and the
+       * sizes move by a percent a week. Without them the tool can only count
+       * downloads, and counting picks `europe` — one file, 27 GB.
+       */
+      server.middlewares.use('/api/pbf-sizes', async (request, response, next) => {
+        if (request.method !== 'POST') return next();
+        const urls = JSON.parse(await body(request)) as string[];
+        const held = JSON.parse(await readFile(SIZES_CACHE, 'utf8').catch(() => '{}')) as
+          Record<string, number>;
+
+        const missing = urls.filter((url) => held[url] === undefined);
+        for (let i = 0; i < missing.length; i += 8) {
+          await Promise.all(
+            missing.slice(i, i + 8).map(async (url) => {
+              try {
+                const head = await fetch(url, {
+                  method: 'HEAD',
+                  signal: AbortSignal.timeout(20000),
+                });
+                held[url] = Number(head.headers.get('content-length') ?? 0);
+              } catch {
+                held[url] = 0; // unknown; the cover treats it as unusable
+              }
+            }),
+          );
+          // Saved per batch, not at the end: a first run measures sixty-odd
+          // extracts over a slow HEAD each, and losing all of it because the
+          // page navigated away makes the next run just as slow.
+          await mkdir(dirname(SIZES_CACHE), { recursive: true });
+          await writeFile(SIZES_CACHE, JSON.stringify(held));
+        }
+
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify(Object.fromEntries(urls.map((u) => [u, held[u]]))));
       });
 
       // Cached on disk: 555 regions of polygon, and the tool asks on every edit.

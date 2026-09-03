@@ -268,7 +268,13 @@ async function load() {
 }
 
 async function save() {
-  const body = JSON.stringify({ zoom: COVERAGE_ZOOM, cells: [...selected].sort() }, null, 2);
+  // The extracts go with the cells, so `extract:data` downloads exactly the set
+  // that was chosen here rather than working it out again with no size data.
+  const body = JSON.stringify(
+    { zoom: COVERAGE_ZOOM, cells: [...selected].sort(), sources: chosen },
+    null,
+    2,
+  );
   try {
     const response = await fetch('/api/coverage', {
       method: 'POST',
@@ -302,16 +308,27 @@ type Region = {
 
 let regions: Region[] | null = null;
 
+/** The extracts the current selection needs, cheapest set first. Saved with it. */
+let chosen: { id: string; name: string; pbf: string }[] = [];
+
 /**
- * Which Geofabrik extracts the selection needs.
+ * Which Geofabrik extracts the selection needs, chosen by total bytes.
  *
- * Deepest match wins: Alpine coverage should pull `nord-est` rather than the
- * whole of Italy, which is most of the download saved before the pipeline runs
- * at all. This is what makes extending past Italy a data question rather than a
- * code one.
+ * Not by *count*: asked for the fewest downloads, the answer is `europe`, once,
+ * at 27 GB. And not by taking the deepest region containing each cell either —
+ * Geofabrik's tree has overlapping special regions like `alps` and `dach` that
+ * are nobody's child, so "deepest" fragmented an Alpine selection into German
+ * Regierungsbezirke and French départements, 23 downloads for 7.25 GB, with
+ * `alps` never chosen at all despite covering more than half the cells on its
+ * own.
+ *
+ * Greedy on bytes-per-new-cell instead, which picks `alps` first and lands on
+ * 10 downloads for 5.7 GB over the same ground. Sizes come from the dev server,
+ * since a browser cannot ask Geofabrik for them across origins.
  */
 async function showRegions() {
   const list = document.getElementById('regions')!;
+  chosen = [];
   if (selected.size === 0) {
     list.innerHTML = '<li>—</li>';
     return;
@@ -341,31 +358,76 @@ async function showRegions() {
     }
   }
 
-  const depth = (region: Region): number => {
-    let n = 0;
-    let at: Region | undefined = region;
-    while (at?.parent) {
-      at = regions!.find((r) => r.id === at!.parent);
-      n++;
-    }
-    return n;
-  };
-
-  const needed = new Map<string, Region>();
-  for (const key of selected) {
+  const cells = [...selected];
+  const centres = cells.map((key) => {
     const [w, s, e, n] = bboxOfCell(key, COVERAGE_ZOOM);
-    const centre: [number, number] = [(w + e) / 2, (s + n) / 2];
-    const hits = regions.filter((region) => containsPoint(region, centre));
-    if (hits.length === 0) continue;
-    const best = hits.reduce((a, b) => (depth(b) > depth(a) ? b : a));
-    needed.set(best.id, best);
+    return [(w + e) / 2, (s + n) / 2] as [number, number];
+  });
+
+  // Which cells each region could supply. Regions touching none are dropped.
+  const candidates = regions
+    .map((region) => ({
+      region,
+      cells: new Set(centres.map((p, i) => (containsPoint(region, p) ? i : -1)).filter((i) => i >= 0)),
+    }))
+    .filter((c) => c.cells.size > 0);
+
+  if (candidates.length === 0) {
+    list.innerHTML = '<li>No Geofabrik region matched.</li>';
+    return;
   }
 
-  list.innerHTML = needed.size
-    ? [...needed.values()]
-        .map((r) => `<li><strong>${r.name}</strong><br /><code>${r.pbf}</code></li>`)
-        .join('')
-    : '<li>No Geofabrik region matched.</li>';
+  list.innerHTML = '<li>Measuring downloads…</li>';
+  let sizes: Record<string, number>;
+  try {
+    const response = await fetch('/api/pbf-sizes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(candidates.map((c) => c.region.pbf)),
+    });
+    sizes = (await response.json()) as Record<string, number>;
+  } catch {
+    list.innerHTML = '<li>Could not measure download sizes.</li>';
+    return;
+  }
+
+  const left = new Set(cells.map((_, i) => i));
+  const picked: { region: Region; cells: number; bytes: number }[] = [];
+  while (left.size > 0) {
+    let best: (typeof candidates)[number] | null = null;
+    let bestCost = Infinity;
+    let bestNew = 0;
+    for (const candidate of candidates) {
+      const gained = [...candidate.cells].filter((i) => left.has(i)).length;
+      const bytes = sizes[candidate.region.pbf];
+      if (!gained || !bytes) continue;
+      const cost = bytes / gained;
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = candidate;
+        bestNew = gained;
+      }
+    }
+    if (!best) break;
+    picked.push({ region: best.region, cells: bestNew, bytes: sizes[best.region.pbf] });
+    for (const i of best.cells) left.delete(i);
+  }
+
+  chosen = picked.map(({ region }) => ({ id: region.id, name: region.name, pbf: region.pbf }));
+
+  let running = 0;
+  const mb = (bytes: number) => `${Math.round(bytes / 1048576)} MB`;
+  list.innerHTML =
+    picked
+      .map(({ region, cells: n, bytes }) => {
+        running += bytes;
+        return (
+          `<li><strong>${region.name}</strong><br />` +
+          `<small>${n} cells · ${mb(bytes)} · running total ` +
+          `${(running / 1073741824).toFixed(2)} GB</small></li>`
+        );
+      })
+      .join('') + (left.size ? `<li><em>${left.size} cells unmatched</em></li>` : '');
 }
 
 function containsPoint(region: Region, point: [number, number]): boolean {
