@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { readOcean } from './coastline.ts';
-import { coverageRects, readCoverage } from './coverage.ts';
+import { coverageBBox, readCoverage } from './coverage.ts';
 import { COVERAGE } from './extract.ts';
 import {
   classify,
@@ -400,7 +400,18 @@ async function buildWater() {
    */
   const coverage = readCoverage();
   let ocean = 0;
-  for (const piece of await readOcean(coverage ? coverageRects(coverage) : [COVERAGE])) {
+  /*
+   * The sea is taken for the whole coverage *box*, not the cells inside it.
+   *
+   * Filtered per cell, the ocean stops at the edge of each covered rectangle —
+   * and a low-zoom tile spans far more ground than the cells beneath it, so the
+   * Tyrrhenian came out as rectangles of blue with the sea bed's own relief
+   * shading through the gaps between them. The land can stop at the coverage
+   * edge and read as unsurveyed ground; water that stops mid-sea reads as a
+   * broken map.
+   */
+  const seaBox = coverage ? coverageBBox(coverage) : COVERAGE;
+  for (const piece of await readOcean([seaBox])) {
     const shape = toShape(
       { type: 'MultiPolygon', coordinates: piece.rings as unknown as never },
       SHORE_TOLERANCE_KM,

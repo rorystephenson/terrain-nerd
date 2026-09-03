@@ -86,9 +86,13 @@ test('water is drawn from the context source, rivers beneath lakes', () => {
 test('the app fetches a picture and its own features, and nothing else', () => {
   // The elevation stream is gone: the shading it existed to compute is baked
   // into the tiles, and it was 5.15 MB of a 6.3 MB first load.
+  // The elevation stream is gone: the shading it existed to compute is baked
+  // into the tiles, and it was 5.15 MB of a 6.3 MB first load. Ground we have
+  // not rendered is answered from the bundle, not from another source.
   assert.deepEqual(Object.keys(style.sources).sort(), ['basemap', 'features']);
-  const basemapSource = style.sources.basemap as { type: string; maxzoom?: number };
+  const basemapSource = style.sources.basemap as { type: string; maxzoom?: number; tileSize?: number };
   assert.equal(basemapSource.type, 'raster');
+  assert.equal(basemapSource.tileSize, 512);
   assert.equal(basemapSource.maxzoom, 11, 'the pyramid stops here; MapLibre overzooms above it');
 });
 
