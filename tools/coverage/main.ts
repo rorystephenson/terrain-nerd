@@ -4,9 +4,9 @@
  * A dev tool, not part of the app: it runs on its own Vite root and writes
  * `pipeline/coverage.json` straight to disk through a middleware, so choosing
  * coverage is a matter of clicking squares rather than editing a list of
- * indices by hand. The basemap is OpenFreeMap rather than our own style —
- * orientation is the whole job here, and it is the same source the app falls
- * back to outside covered ground.
+ * indices by hand. The basemap is OpenFreeMap rather than our own style: our
+ * own only exists inside coverage, which is precisely the thing being chosen
+ * here, and orientation is the whole job.
  */
 import maplibregl from 'maplibre-gl';
 

@@ -112,7 +112,7 @@ names the map is allowed to show, which is why they are not optional. A quiz you
 cannot find your way around is not a harder quiz, just a worse one.
 
 Every settlement carries the zooms it may be named at, worked out once for the
-whole country before the browser ever sees it, so the builder and the player
+whole coverage before the browser ever sees it, so the builder and the player
 both do the same thing with it: draw the name if the map's zoom is inside its
 range. Panning cannot change that answer, because nothing in it looks at where
 the viewport sits.
@@ -124,50 +124,83 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-The app needs the data pool to exist first — see below.
+The app needs the data pool to exist first — see below — and the basemap tiles
+to have been rendered, see [The map](#the-map). In production those tiles come
+from Cloudflare R2; a dev server reads them out of `pipeline/cache/tiles`
+instead, so local work needs no upload and keeps working offline against
+whatever has been rendered so far.
 
 ## Data
 
-Coverage is **all of Italy**, unfiltered: every named valley, peak, pass and
-settlement. The pipeline deliberately makes no judgement about what is worth
+Coverage is **chosen, not inherited from a border**: 527 z10 cells over the
+Alps, the Apennines, Corsica and the Dinarides, picked by hand in
+`tools/coverage`. Inside it nothing is filtered — every named valley, peak, pass
+and settlement. The pipeline deliberately makes no judgement about what is worth
 learning; that is the builder's job.
 
 | | count |
 |---|---|
-| Mountains | 38,058 |
-| Valleys | 3,510 (merged from 4,193 named ways) |
-| Passes | 4,255 |
-| Settlements | 66,180 |
-| Lakes | 11,457 |
-| Rivers and waterways | 19,383 |
-| Major roads | 496,174 |
-| Glaciers | 999 |
+| Mountains | 73,758 |
+| Valleys | 5,960 (merged from named ways) |
+| Passes | 7,288 |
+| Settlements | 68,807 |
+
+Roads, glaciers, rivers, lakes and coastline are extracted as well, but nothing
+downstream loads them: they exist only to be drawn into the basemap tiles, so
+the browser never sees that geometry.
 
 Two steps, deliberately separate, so changing how data is processed never means
 downloading a country again:
 
 ```bash
-# 1. Download the extract (~2.2 GB, resumable), then filter it locally.
-curl -L -C - -o pipeline/cache/osm/italy-latest.osm.pbf \
-  https://download.geofabrik.de/europe/italy-latest.osm.pbf
-npm run extract:data          # ~15s per layer, needs: brew install osmium-tool
+# 1. Download every extract the coverage needs (~5.7 GB, resumable), clip each
+#    to coverage, and filter it locally.   needs: brew install osmium-tool
+npm run extract:data
 
-# 2. Turn the extract into what the browser loads.
-npm run build:data                                  # ~2 min
-npm run build:data -- --skip-water                  # reuse the water chunks on disk
+# 2. Turn the extracts into what the browser loads, and into the vector tiles
+#    the renderer draws from.              needs: brew install tippecanoe
+npm run build:data
+npm run build:data -- --skip-water                  # ~2 min saved
 npm run build:data -- --skip-water --skip-context   # terrain only, ~3s
 ```
 
-Water is by far the slowest layer — 178 MB of river geometry — and context is
-296 MB of roads; both change rarely, so `--skip-water` and `--skip-context` read
-the existing chunks' counts back instead of regenerating them. Both skips
-together leave just the terrain layer, which is what tuning how place names are
-thinned re-runs, so that loop is seconds rather than minutes.
+Water is by far the slowest layer and context the second; both change rarely, so
+either can be skipped. The two skips together leave just the terrain layer,
+which is what tuning how place names are thinned re-runs, so that loop is seconds
+rather than minutes. Skipping either also skips the vector tiles, since half a
+basemap is worse than no rebuild at all.
 
 `extract:data` writes only to `pipeline/cache/osm/`; `build:data` reads only from
 it. The one network call in step 2 is Wikidata sitelink counts, which are cached
 on disk and requested only for ids not already held, so an interrupted run
 resumes rather than restarting.
+
+### Picking the ground, and paying for it
+
+`npm run coverage` puts a z10 grid (~27 km squares) over a plain basemap, with
+thermal.kk7.ch's skyways and thermals as overlays — because the ground worth
+covering is the ground people actually fly, not the ground that looks dramatic
+on a relief map. Clicking cells writes `pipeline/coverage.json` straight to disk
+through a middleware, so coverage is a matter of clicking squares rather than
+editing a list of indices.
+
+**The choice decides the downloads.** Geofabrik publishes its region polygons in
+`index-v1.json`, so the tool can work out which extracts cover the chosen cells
+— and, more usefully, which combination costs the fewest bytes. Taking the
+deepest matching region per cell looks right and is not: it hides `alps`, which
+covers most of the selection in one file, behind a scatter of German
+Regierungsbezirke. So the pick is a greedy set cover weighted by **bytes per
+newly covered cell**, with real file sizes fetched by HEAD and cached to disk.
+For the current selection that is 10 extracts and ~5.7 GB, `alps` chosen first.
+
+`extract.ts` downloads each one, clips it with `osmium extract -p` *before*
+filtering, and concatenates the results. Two things bit here. `osmium merge`
+refuses extracts built on different days — "Node ID twice in input" — so sources
+are filtered and exported one at a time and deduped by feature id on read, which
+matters because `alps` and `italy` both hold Trentino. And a crashed export once
+left a partial file newer than its inputs, which the next run read as up to date
+and built a pool with 243 mountains and no valleys at all; every layer is now
+written to a temp file and renamed into place.
 
 ### Why not Overpass
 
@@ -179,10 +212,13 @@ extract is one download, filtered in seconds, and re-filtering costs nothing.
 
 ### Chunking
 
-The pool is far too big to load at once, so it ships as 0.5° cells (~55 km
-square) under `web/public/data/<kind>/<cell>.geojson`, with an `index.json`
-listing which cells hold anything. The app loads only the cells its area touches,
-and only for the feature types that are switched on.
+The pool is far too big to load at once, so it ships as **z9 tiles** (~55 km
+square at Alpine latitudes) under `web/public/data/<kind>/<cell>.geojson`, with
+an `index.json` listing which cells hold anything. The app loads only the cells
+its area touches, and only for the feature types that are switched on. Tiles
+rather than the degree cells this started with, so that the chunk grid, the
+coverage grid and the basemap pyramid are all the same arithmetic — `mercator.ts`
+is the single implementation of it, shared by pipeline and browser.
 
 A feature is written into **every** cell its bounding box touches, so a long
 valley does not vanish when you look at the neighbouring cell; the app dedupes by
@@ -228,18 +264,93 @@ leaving a hole with no shape around it.
 
 ## The map
 
-There is no basemap provider. The whole thing is assembled in the browser from
-raw elevation — MapLibre's `color-relief` and `hillshade` layers over keyless
-Terrarium DEM tiles — plus OSM roads, glaciers and water from our own pipeline.
-No API key, no tile bill, and nothing arrives pre-labelled.
+**The basemap is not assembled in the browser and not bought from anyone.** It
+is rendered once on a laptop — relief, both hillshade passes, glaciers, sea,
+rivers, lakes and roads, all of it — into a pyramid of WebP tiles served from
+Cloudflare R2. z4 to z11, 2,905 tiles, 127 MB for the whole coverage. No API
+key, no tile bill, and nothing arrives pre-labelled.
+
+It used to be assembled live, from MapLibre's `color-relief` and `hillshade`
+over keyless Terrarium DEM tiles, with our own vector furniture over the top.
+That worked, and the vector tiles were cheap — 70 KB a view — but **the DEM was
+5.15 MB of a 6.3 MB first load, 82% of it**, because Terrarium PNGs encode
+elevation at full precision and barely compress. Nothing queried that elevation
+at runtime; it existed only to be shaded. So the shading happens once, on a
+laptop. First load is now about 1 MB, a z6 view went from 10.9 MB to 70 KB, and
+a drag frame from 440 ms to 106 ms.
+
+The deepest view worth having was measured rather than assumed — z10.9, by
+looking — which is what makes the pyramid 2,905 tiles rather than the 180,000 a
+z14 ceiling would need. Raster sources *round* the zoom where vector sources
+floor it, so 10.9 asks for z11, and z11 is exactly the top needed. `MAX_ZOOM` is
+12, one level of overzoom past the tiles: soft on a retina screen at full zoom,
+and the deliberate trade for a 127 MB pyramid over a roughly 580 MB one. It is
+not a one-way door: re-rendering at @2x needs time and disk, not a code change.
 
 **The style contains no symbol layers at all,** and a test enforces it. Standard
 topo tiles print valley and peak names straight into the raster, which would
-hand the player every answer. Place names, where a quiz asks for them, are HTML
-markers instead — which also means no glyph endpoint and therefore no API key.
-Because HTML markers do not collide-avoid the way symbol layers do, the thinning
-that a symbol layer would have done for free is done in the pipeline, once, for
-the whole country. Contours are drawn unlabelled for the same reason.
+hand the player every answer. Nor is any name baked into ours: place names are
+HTML markers built by app code, so they stay live, stay thinned per zoom, and
+stay free to become multilingual later — the extracts already carry `name:de`,
+`name:it` and `name:sl`. That also means no glyph endpoint and therefore no API
+key. Because HTML markers do not collide-avoid the way symbol layers do, the
+thinning that a symbol layer would have done for free is done in the pipeline,
+once, for the whole coverage. Contours are drawn unlabelled for the same reason.
+
+### Rendering the tiles
+
+`npm run render:tiles` serves the render page and `node tools/render/render.mjs`
+drives it through headless Chrome. It is **MapLibre GL JS, the same renderer the
+app uses, over the same style builder** — which is the whole point. MapLibre
+Native would be the obvious host, but `color-relief` was still in development
+there as of late 2025, and Martin's renderer handles fill, line and circle only.
+A second implementation's impression of this style is not this style: the
+elevation palette was fitted by measurement against a reference render, and a
+different engine's shading is a different answer.
+
+Two things make the run bearable. Tiles are drawn **16 at a time** — a 2048 px
+canvas is exactly a 4×4 block at its own zoom — so the pyramid costs a couple of
+hundred screenshots rather than a couple of thousand. And the DEM is cached to
+disk on the way through, so a re-render after a style change costs no network:
+the full pyramid takes 5.6 minutes warm. A tile already on disk is never
+redrawn, so an interrupted run resumes.
+
+The capture waits on the map's `idle` event rather than a timeout, because this
+failure mode is quiet: a tile grabbed before the DEM has arrived is blank but
+perfectly well-formed, and looks exactly like a rendered one.
+
+`node tools/render/upload.mjs` puts them in R2 — individual objects rather than
+one archive, because coverage only ever grows, so adding a region uploads its
+own new tiles and nothing else where a single PMTiles archive would be rebuilt
+and re-sent whole. It skips what is already there unless given `--force`, and
+credentials come from `.env`, which is gitignored. `Cache-Control` is a day
+rather than a year: the tiles at a given path are *not* immutable, since a style
+change replaces every one of them in place, and marked immutable they would sit
+in edge caches until something purged them.
+
+### The edge of coverage
+
+Outside the pyramid the map draws a placeholder saying the ground is not
+covered. A free third-party terrain layer was tried there first and dropped: it
+made unsupported ground look like a working map, which is the opposite of what
+the edge of coverage should say.
+
+**Nothing decides that by taking a 404.** The 527 coverage cells ship in
+`index.json`, about 5 KB, and a `tn://` protocol handler resolves every tile
+request against them before the network is touched — so an uncovered tile costs
+no request and no billed read. A tile that is *covered but missing* — mid-render,
+a part-finished upload — deliberately fails instead, which leaves MapLibre
+showing the parent tile scaled up. Blurry and continuous beats sharp and wrong,
+and saying "not supported" over supported ground is a lie the user cannot tell
+from the truth.
+
+**The boundary is drawn once, in the tiles.** It used to be decided twice: the
+renderer drew a low-zoom tile if any part of it was covered, while the client
+asked the same question of a different grid, and the two disagreed more the
+further out you zoomed — a z4 tile was 6% honest, z6 23%, z8 56%. The hatch
+marking uncovered ground is now painted into the tile itself at z10 cell
+resolution, so a wide view shows exactly which squares exist. The pattern is
+offset by the tile's own position so it runs continuously across seams.
 
 ### The elevation palette is measured, not designed
 
@@ -284,7 +395,7 @@ moves the boundary the churn happens at. It has to stop being a decision the
 viewport can participate in, which is what the whole vector-tile world does:
 tippecanoe's label grid, OpenMapTiles' `rank`.
 
-So the pass runs over all of Italy at once, in **world pixels** rather than
+So the pass runs over the whole coverage at once, in **world pixels** rather than
 degrees, admitting names strongest first — tier, then population, then OSM id so
 the answer is reproducible — and recording the first zoom each one fits at. It
 measures the same box `labels.ts` draws with, including the per-rank font sizes,
@@ -305,14 +416,19 @@ the map has to be drawing the city's own ground wider than a screen, *and* three
 finer names inside that ground must already be drawn with the nearest of them
 close to where the old one was. Either half alone gets it wrong. On the count
 alone Trento loses its name at z12, with twenty kilometres still on screen; on
-the scale alone, empty country goes unnamed. Ninety-one names across Italy hand
-over, nearly all of them cities and towns — a village's ground is a few hundred
-metres, which the map is never inside.
+the scale alone, empty country goes unnamed. Twenty-five names hand over, every
+one of them a city — a village's ground is a few hundred metres, which the map
+is never inside.
 
 The cost, stated plainly: dead-centre on a handed-over city at the deepest zoom,
-a phone can end up with no name on screen at all — 25 of the 91, against 11 on a
-laptop. `HANDOVER_PX` is the dial, and zero retirements is `TAKEOVER` set past
-any real count.
+a phone can end up with no name on screen at all. `HANDOVER_PX` is the dial, and
+zero retirements is `TAKEOVER` set past any real count.
+
+**A name with no room at any zoom is dropped, not clamped to the ceiling.** The
+ceiling is z12, matching the map's, and 38,245 of 107,052 names never fit below
+it. Giving them the ceiling as a minzoom would stack every one of them on the
+deepest zoom, which is not thinning; leaving them out takes the places directory
+from 19 MB to 12 MB.
 
 Because the answer is per-label, **there is nothing to settle before fetching.**
 The names refresh on every view change, straight through: what it costs is a
@@ -325,14 +441,16 @@ pan. A late batch can only add now, so it went.
 The fetch box is stated in pixels, and asks for the view plus about half a
 label's reach. An unmeasured canvas gets no pad rather than a guessed one:
 treating a canvas of zero as one pixel makes the pad four hundred times the
-view, which touches every cell in the country — that is how opening the builder
+view, which touches every cell in the pool — that is how opening the builder
 briefly came to download the whole settlement pool, twelve megabytes of it,
 before drawing a single name.
 
 ### Shading is two passes
 
-`hillshade` runs twice. The first does the modelling; the second is shadow-only,
-with no highlight at all, purely to deepen the dark end.
+`hillshade` runs twice — at render time now, but the reasoning is unchanged and
+still lives in the style the renderer draws with. The first pass does the
+modelling; the second is shadow-only, with no highlight at all, purely to deepen
+the dark end.
 
 That is not a flourish — it is the only dial left. MapLibre caps
 `hillshade-exaggeration` at 1 (values above it are *silently refused*, which
@@ -357,34 +475,45 @@ pan now runs with zero long tasks and a 33 ms worst frame.
 
 ```
 pipeline/          run on demand, never at build time
-  extract.ts       Geofabrik pbf -> filtered GeoJSON-seq  (osmium)
+  extract.ts       Geofabrik pbf -> clipped, filtered GeoJSON-seq  (osmium)
   process.ts       GeoJSON-seq -> chunked GeoJSON + index.json
-  source.ts        streams the extract, source-agnostic RawElement
+  tiles.ts         the drawn layers -> context.pmtiles     (tippecanoe)
+  coastline.ts     ocean polygons from the OSM water shapefile
+  coverage.ts      reading coverage.json, and its rectangles
+  source.ts        streams the extracts, dedupes by id
   normalize.ts     merge same-named segments by proximity
+  stitch.ts        join road ways into maximal chains at junctions
   importance.ts    popularity scoring + Wikidata sitelinks
   spatial.ts       grid index: nearest higher peak, radius queries
   placeZoom.ts     which zooms each settlement is named at
   simplify.ts      Douglas-Peucker
-  grid.ts          the chunk grid
+  mercator.ts      web mercator and tile maths, shared with the browser
+  grid.ts          the chunk grid, in tiles
+tools/             dev tools, on their own Vite roots
+  coverage/        pick the ground, and the extracts that cover it cheapest
+  render/          draw the tile pyramid, and upload it to R2
 web/src/lib/
   terrain.ts       elevation palette and DEM source     (pure)
-  builder.ts       inclusion rules, pins, resolution   (pure)
+  mapStyle.ts      the rendered style, and the app's    (pure)
+  builder.ts       inclusion rules, pins, resolution    (pure)
+  selection.ts     the crop frame, in pixels            (pure)
   places.ts        reading a name's zoom range          (pure)
-  quiz.ts          quiz state machine                  (pure)
+  quiz.ts          quiz state machine                   (pure)
   labels.ts        how much ink a name puts on screen   (pure)
-  grid.ts          client half of the chunk grid       (pure)
+  grid.ts          client half of the chunk grid        (pure)
+  tiles.ts         the tn:// protocol and coverage
   chunks.ts        cell loading and caching
   storage.ts       localStorage
   MapView.svelte   MapLibre, both play and build modes
 ```
 
 The pure modules hold the logic worth being sure about, and are directly
-unit-tested:
+unit-tested — including two that live in the pipeline, `placeZoom.ts` and
+`stitch.ts`, tested from here because this is where the test runner is:
 
 ```bash
-npm test             # 76 tests
-npm run typecheck -w pipeline
-npm run check -w web
+npm test             # 139 tests
+npm run typecheck    # pipeline, web and the tools
 ```
 
 ## Known gaps
@@ -394,13 +523,21 @@ npm run check -w web
 - **Peak isolation uses named peaks only.** An unnamed higher summit nearby will
   not reduce a peak's isolation. In practice a named sub-summit's nearest higher
   neighbour is the named main summit it hangs off, so this holds up.
-- **Coverage stops at Italy's bounding box**, which does include the Swiss,
-  Austrian and Slovenian border terrain — deliberately, since the terrain people
-  name does not stop at the border.
-- **`web/public/data/` is ~67 MB**, of which roads are 25 MB. That is a hosting
-  number, not a per-visit one: cells load individually, and a Val Rendena
-  viewport pulls about 650 KB of roads, glaciers and water across four cells.
-  Dropping `secondary` roads would halve the road layer if it ever matters.
+- **Coverage is a set of squares, and the builder does not check it.** Frame an
+  area outside the rendered ground and you get a placeholder basemap and an
+  empty quiz rather than a refusal. The bundled coverage set is right there; it
+  is simply not consulted at that point yet.
+- **`web/public/data/` is ~39 MB**, of which place names are 12 MB and peaks
+  20 MB. That is a hosting number, not a per-visit one: cells load individually,
+  and a Val Rendena viewport pulls a few hundred kilobytes across four cells.
+  The basemap's 127 MB is not on that server at all — it is in R2, where egress
+  is free.
+- **A style change now costs a re-render**, not a page refresh. Changing the
+  palette or a road colour means redrawing the pyramid — six minutes with a warm
+  DEM cache — and re-uploading 127 MB with `--force` before anyone sees it. The
+  palette was fitted by measurement and is settled, so this is an accepted cost
+  rather than a live problem, but it is the one that does not show up in the
+  byte counts.
 - **Green follows elevation, not land cover.** The reference style colours by
   what is actually on the ground, so its treeline bends with aspect and shelter
   while ours is a horizontal band. Fixing that means shipping a landcover layer.
