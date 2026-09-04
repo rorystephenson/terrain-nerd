@@ -81,6 +81,57 @@ test('a wider spacing never keeps more', () => {
   }
 });
 
+test('nothing ever comes back as the spacing widens', () => {
+  /*
+   * A falling count is not enough: what you watch on screen is one feature, and
+   * seeing it go, return and go again as you drag in one direction is the whole
+   * complaint. This is why the rule compares against every candidate rather
+   * than against the survivors — greedy admission makes a feature's fate depend
+   * on which of its neighbours happened to survive, so widening the spacing can
+   * rescue it.
+   */
+  const items = lattice(9, 9, 0.012);
+  let held: Set<string> | null = null;
+  for (let spacing = 0.25; spacing <= 8; spacing += 0.25) {
+    const kept = new Set(thin(items, spacing).map((i) => i.id));
+    if (held) {
+      for (const id of kept) {
+        assert.ok(held.has(id), `${id} came back at ${spacing}km after being thinned out`);
+      }
+    }
+    held = kept;
+  }
+});
+
+test('the three in a line that started all this', () => {
+  // Strong at 0 km, middle at 3, weak at 5. Greedy dropped the weak one at 2 km,
+  // handed it back at 3.5 once the middle one was itself crowded out, then took
+  // it away again at 5.
+  const east = (km: number) => 11 + km / (111.32 * Math.cos((46 * Math.PI) / 180));
+  const line = [
+    { ...at(east(0), 46, 0.9), id: 'strong' },
+    { ...at(east(3), 46, 0.5), id: 'middle' },
+    { ...at(east(5), 46, 0.1), id: 'weak' },
+  ];
+  const keptAt = (spacing: number) => thin(line, spacing).map((i) => i.id);
+  assert.deepEqual(keptAt(1), ['strong', 'middle', 'weak']);
+  assert.deepEqual(keptAt(2.5), ['strong', 'middle']);
+  assert.deepEqual(keptAt(3.5), ['strong']);
+  assert.deepEqual(keptAt(6), ['strong']);
+});
+
+test('what is kept is still separated by the spacing', () => {
+  /*
+   * Not obvious from the rule, and worth pinning: if two kept features were
+   * closer than the spacing, the weaker of the two would have the stronger one
+   * within the spacing and so would not have been kept.
+   */
+  for (const spacing of [1, 2, 3.5]) {
+    const kept = thin(lattice(9, 9, 0.009), spacing);
+    assert.ok(closestPair(kept) >= spacing, `${spacing}km: ${closestPair(kept).toFixed(2)}km apart`);
+  }
+});
+
 test('the strongest of a cluster is the one that survives', () => {
   const weak = at(11, 46, 0.2);
   const strong = at(11.001, 46.001, 0.9);

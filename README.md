@@ -127,14 +127,35 @@ mountain alone at the end of a ridge earns its place precisely because there is
 nothing else to call it.
 
 So there is a third control, on the selection as a whole rather than on a kind:
-**keep one every N km**. It is a greedy strongest-first pass, the same shape as
-the label thinning in `placeZoom.ts`, and it takes the Adamello frame from 59
-peaks to 33 at 2 km while still holding nine of the twelve a person picked by
-hand. Each kind is thinned against itself — a pass and the peak above it are two
-different questions about one col — and valleys are not thinned at all, having no
-scores to rank a cluster by.
+**keep one every N km**. The rule is one line — *keep a feature when nothing
+stronger stands within the spacing of it* — so a summit survives by being the
+best thing in its own neighbourhood, which is what "the one you would name"
+means. It takes the Adamello frame from 59 peaks to 29 at 2 km while still
+holding nine of the twelve a person picked by hand. Each kind is thinned against
+itself — a pass and the peak above it are two different questions about one col —
+and valleys are not thinned at all, having no scores to rank a cluster by.
 
-Two rules make it safe to leave on:
+**Comparing against every candidate rather than against the survivors is the
+whole design**, and it was not the first attempt. Greedy admission — strongest
+first, dropping anything too close to something *already admitted* — gives the
+same kind of answer and is wrong in a way only dragging the slider shows. A
+feature's fate then depends on which of its neighbours happened to survive, so
+widening the spacing can rescue it: three on a line, strong at 0 km, middle at 3,
+weak at 5. At 2 km the weak one is crowded out by the middle one. At 3.5 km the
+middle one is itself crowded out by the strong one, which hands the weak one
+back — and it goes again at 5. Watching one mountain blink out, return and go
+again while dragging in one direction is not a spacing control, it is a cascade.
+Against the full candidate set each feature has a single distance to the nearest
+thing stronger than it, the slider is a floor on that number, and widening it can
+only ever remove. It is the same move `placeZoom.ts` makes for labels, and the
+same quantity `scores.ts` already calls isolation, measured in strength instead
+of height.
+
+What comes back is still properly separated, which is not obvious: if two kept
+features were closer than the spacing, the weaker would have the stronger one
+within the spacing and so would not have been kept.
+
+Two more rules make it safe to leave on:
 
 - **A pin is never thinned**, like every other control here.
 - **A pin takes no ground either.** Adding something by hand must not quietly
@@ -711,7 +732,7 @@ unit-tested — including five that live in the pipeline (`placeZoom.ts`,
 this is where the test runner is:
 
 ```bash
-npm test             # 197 tests
+npm test             # 200 tests
 npm run typecheck    # pipeline, web and the tools
 ```
 

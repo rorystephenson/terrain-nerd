@@ -7,9 +7,31 @@
  * say where they went. Meanwhile a modest mountain alone at the end of a ridge
  * is worth asking about precisely because there is nothing else to call it.
  *
- * So this is a spacing pass, greedy and strongest-first — the same shape as
- * `placeZoom.ts`'s label thinning, which is the repo's existing answer to
- * exactly this question about a different kind of clutter.
+ * The rule is one line: **keep a feature when nothing stronger stands within the
+ * spacing of it.** So a summit survives by being the best thing in its own
+ * neighbourhood, which is what "the one you would name" means.
+ *
+ * This started out greedy instead — admit strongest first, drop anything too
+ * close to something *already admitted* — and that was wrong in a way only
+ * dragging the slider shows. Whether a feature is dropped then depends on which
+ * of its neighbours happened to survive, so widening the spacing can rescue it:
+ * take three on a line, strong at 0 km, middle at 3, weak at 5. At 2 km the weak
+ * one is crowded by the middle one and goes. At 3.5 km the middle one is itself
+ * crowded out by the strong one, which frees the weak one to come back — and it
+ * goes again at 5. A feature flickering in and out as the slider moves in one
+ * direction is not a spacing control, it is a cascade.
+ *
+ * Comparing against every candidate rather than against the survivors takes the
+ * ordering out of it entirely: each feature has one distance to the nearest
+ * thing stronger than it, and the slider is a floor on that number. Widening it
+ * can only ever remove. It is the same move `placeZoom.ts` makes for labels —
+ * decide per feature, offline of any ordering, so there is nothing to cascade —
+ * and the same quantity `scores.ts` already calls isolation, measured in
+ * strength rather than in height.
+ *
+ * The set that comes back is still properly separated, which is not obvious:
+ * if two kept features were closer than the spacing, the weaker of them would
+ * have the stronger one within the spacing, so it would not have been kept.
  *
  * Pure, and free of `QuizFeature`: it takes whatever carries the four things it
  * needs, so the caller keeps hold of its own objects and this stays testable
@@ -75,14 +97,10 @@ const strongestFirst = (a: Spaced, b: Spaced): number =>
   b.strength - a.strength || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
- * Drops anything standing too close to something already kept.
- *
- * Greedy against what has been *kept*, not against anything stronger that
- * exists: the other reading drops a feature because of a neighbour that was
- * itself dropped, which does not leave a properly separated set behind.
+ * Keeps every feature that nothing stronger stands within `spacingKm` of.
  *
  * Runs on every slider tick, and the candidate set is at its largest exactly
- * when the score sliders are at zero — so the kept set goes into a bucket grid
+ * when the score sliders are at zero — so the candidates go into a bucket grid
  * sized to the spacing rather than being scanned pairwise. Cells are at least
  * `spacingKm` across on both axes, which is what makes the surrounding eight
  * enough to look at: nothing within the spacing can be further away than that.
@@ -100,25 +118,35 @@ export function thin<T extends Spaced>(items: readonly T[], spacingKm: number): 
     spacingKm / (KM_PER_DEG_LON * cosLat),
   );
 
-  // Keyed by kind as well as position, so a pass can never crowd out the peak
-  // above it: they are two different questions about the same col.
+  /*
+   * Every candidate that can crowd another goes in, survivor or not — that is
+   * what makes the answer independent of any ordering, and so monotone in the
+   * spacing.
+   *
+   * A pin is left out. It is kept whatever the spacing says and it takes no
+   * ground, so it is neither subject to the rule nor part of it.
+   *
+   * Keyed by kind as well as position, so a pass can never crowd out the peak
+   * above it: they are two different questions about the same col.
+   */
   const buckets = new Map<string, T[]>();
-  const cellOf = (item: Spaced) =>
-    `${item.kind}:${Math.floor(item.at[0] / cellDeg)}:${Math.floor(item.at[1] / cellDeg)}`;
-
-  const keep = (item: T) => {
-    const key = cellOf(item);
+  for (const item of items) {
+    if (item.locked) continue;
+    const key = `${item.kind}:${Math.floor(item.at[0] / cellDeg)}:${Math.floor(item.at[1] / cellDeg)}`;
     const bucket = buckets.get(key);
     if (bucket) bucket.push(item);
     else buckets.set(key, [item]);
-  };
+  }
 
-  const crowded = (item: T): boolean => {
+  const outranked = (item: T): boolean => {
     const ix = Math.floor(item.at[0] / cellDeg);
     const iy = Math.floor(item.at[1] / cellDeg);
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (const other of buckets.get(`${item.kind}:${ix + dx}:${iy + dy}`) ?? []) {
+          // Strictly stronger by the total order, which is also what rules out
+          // comparing a feature with itself.
+          if (strongestFirst(other, item) >= 0) continue;
           if (haversineKm(item.at, other.at) < spacingKm) return true;
         }
       }
@@ -126,21 +154,8 @@ export function thin<T extends Spaced>(items: readonly T[], spacingKm: number): 
     return false;
   };
 
-  const kept: T[] = [];
-  for (const item of [...items].sort(strongestFirst)) {
-    // A pin is kept without being asked, and without being added to the grid:
-    // it is an exception to the spacing, not a competitor in it.
-    if (item.locked) {
-      kept.push(item);
-      continue;
-    }
-    if (crowded(item)) continue;
-    keep(item);
-    kept.push(item);
-  }
-
-  // Back into the order they came in: the caller's list is what the map draws,
-  // and reordering it would reshuffle the whole selection on every drag.
-  const survivors = new Set(kept.map((item) => item.id));
-  return items.filter((item) => survivors.has(item.id));
+  // Filtered in place, so what comes back is in the order it went in: the
+  // caller's list is what the map draws, and reordering it would reshuffle the
+  // whole selection on every drag of the slider.
+  return items.filter((item) => item.locked || !outranked(item));
 }
