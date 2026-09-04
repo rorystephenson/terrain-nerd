@@ -11,11 +11,11 @@ valleys, passes and peaks — but it works for anyone who wants the names.
 You choose what to learn. Frame an area, tick which feature types to include,
 and narrow them down with one slider each:
 
-| Type | Filter |
+| Type | Slider |
 |---|---|
 | Valleys | length |
-| Mountains | flight proximity, prominence |
-| Passes | flight proximity, prominence |
+| Mountains | how far apart |
+| Passes | how far apart |
 
 ### Framing the area
 
@@ -67,7 +67,15 @@ dropped onto a browser that already has quizzes cannot destroy them.
 Ranking peaks by altitude fills the top of the list with sub-summits — "Anticima
 Sud" is literally "south sub-peak" — while the names pilots actually say sit a
 thousand metres lower. So mountains and passes carry two computed scores
-instead, each 0–1, each with its own slider.
+instead, each 0–1.
+
+**Neither is on the panel.** They were sliders for as long as it took to find
+where they belong, and `0.27` flight *or* `0.39` prominence is where using them
+landed — loose enough to admit anything anyone would name, on the understanding
+that the spacing below decides how many of those actually get asked. Two settled
+numbers behind one control beat three controls, two of which you set once and
+never touch again. They are still the rule; they are in
+`pipeline/src/featureTypes.ts`, marked `hidden`.
 
 **Flight proximity** is how much people fly near or over the feature, read
 straight off thermal.kk7.ch's skyways layer — every logged XC flight drawn on
@@ -84,10 +92,9 @@ mountain. A pass has no isolation worth measuring, since by definition something
 higher is right beside it, so it swaps that term for how much mountain stands
 over it.
 
-**The two sliders add to each other rather than narrowing each other.** Each one
-contributes the features it admits, so the panel reads "the ones people fly, plus
-the landmarks" — and turning one down to `none` leaves the other still choosing,
-which is how you look at either group on its own.
+**The two add to each other rather than narrowing each other.** Each contributes
+the features it admits, so the rule reads "the ones people fly, plus the
+landmarks".
 
 That is not a preference, it is the only combination that can express a real
 selection. A hand-picked quiz over the Adamello, Brenta and Ledro came to twelve
@@ -111,11 +118,10 @@ Unioning them holds ten of the twelve in **59**, the missing two being Paganella
 and Cima Tosa, which sit below the landmark threshold and are a judgement call no
 score is going to make for you.
 
-Both slide **one stop past the top to "none"**. Since they union, it takes both
-of them to empty the set — which is what you want before pinning a handful in by
-hand. The score they replaced could not do that at all: it was a percentile, so
-its top bucket held 373 peaks by construction, and dragging to the end still left
-every one of them selected.
+The score they replaced could express none of this. It was a single percentile,
+so its top bucket held 373 peaks by construction — dragging to the end still left
+every one of them selected, and there was no way to ask for the flown ones and
+the landmarks as two different questions.
 
 ### Thin out
 
@@ -126,14 +132,24 @@ names more than one or two of them to say where they went. Meanwhile a modest
 mountain alone at the end of a ridge earns its place precisely because there is
 nothing else to call it.
 
-So there is a third control, on the selection as a whole rather than on a kind:
-**keep one every N km**. The rule is one line — *keep a feature when nothing
-stronger stands within the spacing of it* — so a summit survives by being the
-best thing in its own neighbourhood, which is what "the one you would name"
-means. It takes the Adamello frame from 59 peaks to 29 at 2 km while still
-holding nine of the twelve a person picked by hand. Each kind is thinned against
-itself — a pass and the peak above it are two different questions about one col —
-and valleys are not thinned at all, having no scores to rank a cluster by.
+So the one control each kind keeps is **how far apart to stand them**. The rule
+is one line — *keep a feature when nothing stronger stands within the spacing of
+it* — so a summit survives by being the best thing in its own neighbourhood,
+which is what "the one you would name" means.
+
+It runs the whole way: **show all** at one end, **none** at the other, so a
+single slider goes from every feature that qualifies to no questions of that kind
+at all. Mountains and passes have one each and are thinned against themselves — a
+pass and the peak above it are two different questions about one col. Valleys
+have no spacing control and are never thinned: they carry no scores to rank a
+cluster by, so the answer would come down to the id tiebreak, an arbitrary choice
+wearing the clothes of a considered one.
+
+Defaults come from the counts they produce over Val Rendena, where 3 km leaves 28
+of 117 admitted peaks. **Passes want a wider radius for the same job, not a
+narrower one.** There are fewer of them and they already stand further apart, so
+3 km leaves 17 of 35 — half, against a quarter — and it takes 5 km to bring them
+to 10, which is about the share of a quiz passes should be.
 
 **Comparing against every candidate rather than against the survivors is the
 whole design**, and it was not the first attempt. Greedy admission — strongest
@@ -154,15 +170,6 @@ of height.
 What comes back is still properly separated, which is not obvious: if two kept
 features were closer than the spacing, the weaker would have the stronger one
 within the spacing and so would not have been kept.
-
-A **"Prefer prominence"** checkbox sits under the slider and changes only which
-of two close features survives: `0.3 * flight + 0.7 * prominence` instead of
-whichever score is higher. Flight is the noisier half — it comes off a smooth
-raster, so everything under one corridor reads much the same and a cluster's
-members are separated by very little. That is how Monte Tremalzo loses its place
-to Corno Spezzato, a sub-peak 1.3 km away and half as prominent, and both come
-back weighted. It is a checkbox rather than a decision until it has been used on
-real ground; with the spacing off it does nothing at all, and says so.
 
 Two more rules make it safe to leave on:
 

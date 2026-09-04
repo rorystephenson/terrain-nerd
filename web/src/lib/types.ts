@@ -53,6 +53,14 @@ export type FilterSpec = {
   min: number;
   max: number;
   step: number;
+  /**
+   * Kept as a rule but taken off the panel.
+   *
+   * Flight and prominence are settled numbers now, not things to tune per quiz
+   * — they still decide what qualifies, but the only control worth having in
+   * front of you is how much of what qualifies to ask about.
+   */
+  hidden?: boolean;
   default: [number, number];
 };
 
@@ -60,6 +68,8 @@ export type FilterSpec = {
 export type KindInfo = {
   id: KindId;
   label: string;
+  /** Spacing on a fresh builder, in km. Absent means this kind is not thinned. */
+  defaultSpacingKm?: number;
   geometry: 'line' | 'point';
   filters: FilterSpec[];
   count: number;
@@ -103,15 +113,14 @@ export type BuilderState = {
   /** Features the user pinned, either way. Survives every filter change. */
   overrides: Record<string, 'in' | 'out'>;
   /**
-   * How far apart the chosen features have to stand, in km. 0 is off.
+   * Kind id -> how far apart that kind's features must stand, in km.
    *
+   * 0 is off, and the stop past the top of the scale hides the kind entirely.
    * Optional because saved builder state is read back from localStorage
    * verbatim, with no migration — a quiz saved before this existed has no such
    * field and must reopen exactly as it was left, which is thinning off.
    */
-  spacingKm?: number;
-  /** Weigh prominence over flight when deciding who represents a cluster. */
-  preferProminence?: boolean;
+  spacing?: Record<string, number>;
 };
 
 /** One replayable quiz: a frozen set of features. */

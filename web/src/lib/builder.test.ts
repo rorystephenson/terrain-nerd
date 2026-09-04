@@ -12,9 +12,9 @@ import {
   questionCount,
   resolve,
   setKind,
-  setPreferProminence,
   setRange,
   setSpacing,
+  SPACING_NONE,
   toggleOverride,
 } from './builder.ts';
 import type { KindInfo, QuizFeature } from './types.ts';
@@ -36,6 +36,7 @@ const kinds: KindInfo[] = [
     geometry: 'point',
     count: 0,
     cells: {},
+    defaultSpacingKm: 3,
     filters: [
       { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.3, 1] },
       { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.6, 1] },
@@ -72,6 +73,8 @@ function peak(
 test('a fresh builder turns every kind on at its default range', () => {
   const state = initialState(kinds);
   assert.deepEqual(state.kinds, { valley: true, peak: true });
+  // Valleys carry no spacing default, so they are never thinned.
+  assert.deepEqual(state.spacing, { peak: 3 });
   assert.deepEqual(state.ranges.valley, { lengthKm: [3, 40] });
   assert.deepEqual(state.ranges.peak, { flight: [0.3, 1], prominence: [0.6, 1] });
   assert.deepEqual(state.overrides, {});
@@ -210,7 +213,7 @@ test('resolve returns the selection, its extent, and how much was hand-picked', 
 test('features standing on top of each other are thinned to the strongest', () => {
   // Two summits 150 m apart are one question: whichever name you would use.
   let state = initialState(kinds);
-  state = setSpacing(state, 2);
+  state = setSpacing(state, 'peak', 2);
   const features = [
     peak('near', 'Shoulder', 0.8, 0.6, [11, 46]),
     peak('big', 'Summit', 0.9, 0.9, [11.002, 46]),
@@ -222,7 +225,7 @@ test('features standing on top of each other are thinned to the strongest', () =
 });
 
 test('thinning off leaves the selection exactly as the sliders left it', () => {
-  let state = setSpacing(initialState(kinds), 0);
+  let state = setSpacing(initialState(kinds), 'peak', 0);
   const features = [
     peak('near', 'Shoulder', 0.8, 0.6, [11, 46]),
     peak('big', 'Summit', 0.9, 0.9, [11.002, 46]),
@@ -235,8 +238,8 @@ test('thinning off leaves the selection exactly as the sliders left it', () => {
 test('valleys are never thinned, however close together they run', () => {
   // They carry no scores, so there is nothing to rank a cluster by — and two
   // valleys near each other are not the same question the way two summits on
-  // one ridge are.
-  const state = setSpacing(initialState(kinds), 8);
+  // one ridge are. A kind with no spacing simply never enters the pass.
+  const state = setSpacing(initialState(kinds), 'valley', 8);
   const features = [valley('a', 'One', 9), valley('b', 'Two', 9)];
   const { included, thinnedOut } = resolve(features, state);
   assert.equal(included.length, 2);
@@ -246,7 +249,7 @@ test('valleys are never thinned, however close together they run', () => {
 test('a pinned feature survives the spacing that would have dropped it', () => {
   // What reopening a saved quiz leans on: the reconcile pass pins whatever the
   // thinned selection does not offer, and those pins have to hold.
-  let state = setSpacing(initialState(kinds), 5);
+  let state = setSpacing(initialState(kinds), 'peak', 5);
   const shoulder = peak('near', 'Shoulder', 0.5, 0.5, [11, 46]);
   const summit = peak('big', 'Summit', 0.9, 0.9, [11.002, 46]);
   assert.deepEqual(resolve([shoulder, summit], state).included.map((f) => f.id), ['big']);
@@ -257,43 +260,37 @@ test('a pinned feature survives the spacing that would have dropped it', () => {
   assert.deepEqual(new Set(included.map((f) => f.id)), new Set(['near', 'big']));
 });
 
-test('preferring prominence changes which of a cluster survives', () => {
-  /*
-   * The real pair it was written for. Monte Tremalzo is the named mountain and
-   * Corno Spezzato a sub-peak 1.3 km away, half as prominent — but more flown,
-   * because flight comes off a smooth raster and everything under one corridor
-   * reads much the same. Whichever score is higher hands the cluster to the
-   * sub-peak; weighting prominence hands it back.
-   */
-  const tremalzo = peak('tremalzo', 'Monte Tremalzo', 0.526, 0.513, [11, 46]);
-  const spezzato = peak('spezzato', 'Corno Spezzato', 0.637, 0.312, [11.012, 46]);
-  const features = [tremalzo, spezzato];
+test('the top of the spacing scale asks about none of that kind', () => {
+  // One control, the whole way: everything that qualifies at one end, nothing
+  // at the other. Pins survive it, as they survive every other control here.
+  let state = setSpacing(initialState(kinds), 'peak', SPACING_NONE);
+  const summit = peak('big', 'Summit', 0.9, 0.9, [11, 46]);
+  const valle = valley('v', 'A valley', 9);
+  assert.deepEqual(resolve([summit, valle], state).included.map((f) => f.id), ['v']);
 
-  let state = setSpacing(initialState(kinds), 3);
-  assert.deepEqual(resolve(features, state).included.map((f) => f.id), ['spezzato']);
-
-  state = setPreferProminence(state, true);
-  assert.deepEqual(resolve(features, state).included.map((f) => f.id), ['tremalzo']);
+  state = toggleOverride(state, summit, false);
+  assert.deepEqual(
+    new Set(resolve([summit, valle], state).included.map((f) => f.id)),
+    new Set(['v', 'big']),
+  );
 });
 
-test('preferring prominence does nothing with the spacing off', () => {
-  // It only ever decides who represents a cluster, so with no clusters to
-  // represent it must not quietly become a filter.
+test('one kind is thinned without touching another', () => {
+  const state = setSpacing(initialState(kinds), 'peak', 4);
   const features = [
-    peak('a', 'Flown', 0.9, 0.1, [11, 46]),
-    peak('b', 'Prominent', 0.1, 0.9, [11.5, 46]),
+    peak('near', 'Shoulder', 0.8, 0.6, [11, 46]),
+    peak('big', 'Summit', 0.9, 0.9, [11.002, 46]),
+    valley('v1', 'One', 9),
+    valley('v2', 'Two', 9),
   ];
-  const off = setSpacing(initialState(kinds), 0);
-  assert.deepEqual(
-    resolve(features, setPreferProminence(off, true)).included.map((f) => f.id),
-    resolve(features, off).included.map((f) => f.id),
-  );
+  const { included } = resolve(features, state);
+  assert.deepEqual(included.map((f) => f.id), ['big', 'v1', 'v2']);
 });
 
 test('the extent is measured after thinning, not before', () => {
   // The frame has to cover what is actually asked. A thinned outlier that still
   // stretched the bbox would open the quiz on ground it never asks about.
-  let state = setSpacing(initialState(kinds), 3);
+  let state = setSpacing(initialState(kinds), 'peak', 3);
   const features = [
     peak('big', 'Summit', 0.9, 0.9, [11, 46]),
     peak('near', 'Shoulder', 0.8, 0.6, [11.01, 46.01]),

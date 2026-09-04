@@ -4,6 +4,7 @@
   import { loadArea, loadByIds, loadPlaces } from './chunks.ts';
   import {
     clearOverrides,
+    clearSpacing,
     initialState,
     isIncluded,
     shadeOf,
@@ -11,9 +12,10 @@
     questionCount,
     resolve,
     setKind,
-    setPreferProminence,
     setRange,
     setSpacing,
+    SPACING_NONE,
+    SPACING_STEP,
     toggleOverride,
   } from './builder.ts';
   import { placeFetchBox } from './places.ts';
@@ -22,6 +24,7 @@
     BuilderState,
     FilterSpec,
     KindId,
+    KindInfo,
     PlaceFeature,
     PoolIndex,
     QuizFeature,
@@ -64,7 +67,9 @@
      * Raising it again is a decision the person editing can make, and then it
      * means what it says.
      */
-    builder: { ...(editing?.builder ?? initialState(index.kinds)), spacingKm: 0 },
+    builder: editing
+      ? clearSpacing(editing.builder ?? initialState(index.kinds))
+      : initialState(index.kinds),
     name: editing?.name ?? '',
   }));
 
@@ -326,13 +331,16 @@
     });
   }
 
-  /**
-   * Past this the spacing is emptying the map rather than thinning it: at 10 km
-   * a valley-sized area is down to a handful whatever the scores say.
-   */
-  const MAX_SPACING_KM = 10;
+  /** Filters that are still worth a control. See `hidden` in `featureTypes.ts`. */
+  const shown = (kind: KindInfo) => kind.filters.filter((filter) => !filter.hidden);
 
-  const spacingKm = $derived(builder.spacingKm ?? 0);
+  /*
+   * Straight off the state, with no fall back to the kind's default. Falling
+   * back showed 3km on a panel whose state said nothing, so the control read as
+   * applied while the selection was untouched — and a quiz reopened before
+   * spacing existed would silently start thinning.
+   */
+  const spacingOf = (kind: KindInfo) => builder.spacing?.[kind.id] ?? 0;
 
   /** Where a valley is as long as naming an area cares about. */
   const VALLEY_FULL_KM = 40;
@@ -458,7 +466,7 @@
         </label>
 
         {#if builder.kinds[kind.id]}
-          {#each kind.filters as filter, at (filter.key)}
+          {#each shown(kind) as filter, at (filter.key)}
             {@const range = builder.ranges[kind.id]?.[filter.key] ?? filter.default}
             {@const none = noneStop(filter)}
             <!--
@@ -488,46 +496,36 @@
               />
             </div>
           {/each}
+
+          {#if kind.defaultSpacingKm !== undefined}
+            {@const km = spacingOf(kind)}
+            <!--
+              The one control per kind, and it runs the whole way: everything
+              that qualifies at one end, none of it at the other. What decides
+              *what* qualifies is settled and no longer on the panel.
+            -->
+            <div class="filter">
+              <div class="filter-head">
+                <span>Thin out</span>
+                <span class="value" class:none={km === 0 || km >= SPACING_NONE}>
+                  {km >= SPACING_NONE ? 'none' : km === 0 ? 'show all' : `${km.toFixed(1)}km apart`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max={SPACING_NONE}
+                step={SPACING_STEP}
+                value={km}
+                oninput={(e) =>
+                  (builder = setSpacing(builder, kind.id, Number(e.currentTarget.value)))}
+              />
+            </div>
+          {/if}
         {/if}
       </section>
     {/each}
 
-
-    <!--
-      Spacing sits outside the per-kind sliders because it is not a property of
-      a kind: it is about the selection as a whole, and it is the only control
-      here that takes away something the sliders already said yes to. Hence the
-      count of what it removed, right beside the question count.
-    -->
-    <div class="filter spacing">
-      <div class="filter-head">
-        <span>Thin out</span>
-        <span class="value" class:none={spacingKm === 0}>
-          {spacingKm === 0 ? 'off' : `${spacingKm.toFixed(1)}km apart`}
-        </span>
-      </div>
-      <input
-        type="range"
-        min="0"
-        max={MAX_SPACING_KM}
-        step="0.5"
-        value={spacingKm}
-        oninput={(e) => (builder = setSpacing(builder, Number(e.currentTarget.value)))}
-      />
-      <!--
-        Which of two close features survives, and nothing else — so it does
-        nothing at all with the spacing off, and says so rather than sitting
-        there looking live.
-      -->
-      <label class="toggle sub-toggle" class:off={spacingKm === 0}>
-        <input
-          type="checkbox"
-          checked={builder.preferProminence ?? false}
-          onchange={(e) => (builder = setPreferProminence(builder, e.currentTarget.checked))}
-        />
-        <span>Prefer prominence</span>
-      </label>
-    </div>
 
     <div class="tally">
       {#if loading}
@@ -665,10 +663,6 @@
   }
   /* The stop that selects nothing reads as off rather than as a number. */
   .value.none { color: #8a94a2; font-weight: 500; font-style: italic; }
-  /* Set apart from the per-kind sliders: it acts on the whole selection. */
-  .spacing { border-top: 1px solid #e6e9ee; padding-top: 0.7rem; margin-top: 0.2rem; }
-  .sub-toggle { margin-top: 0.45rem; font-size: 0.82rem; font-weight: 500; color: #4a5361; }
-  .sub-toggle.off { opacity: 0.45; }
   input[type='range'] { width: 100%; margin-top: 0.15rem; }
 
   .tally {

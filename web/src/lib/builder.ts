@@ -17,22 +17,30 @@ export const isIncluded = (inclusion: Inclusion): boolean =>
 export const isLocked = (inclusion: Inclusion): boolean =>
   inclusion === 'locked-in' || inclusion === 'locked-out';
 
-/** How far apart a fresh builder stands its features. */
-export const DEFAULT_SPACING_KM = 2;
+/** The widest real spacing the slider offers, and the step it moves in. */
+export const MAX_SPACING_KM = 12;
+export const SPACING_STEP = 0.5;
+
+/**
+ * One step past the top, where the kind is asked about at all.
+ *
+ * The same trick the score sliders use for their "none": rather than a separate
+ * switch, the one control runs the whole way from every feature that qualifies
+ * to none of them.
+ */
+export const SPACING_NONE = MAX_SPACING_KM + SPACING_STEP;
 
 /** The starting point for a fresh builder: every kind on, at its default range. */
 export function initialState(kinds: KindInfo[]): BuilderState {
-  const state: BuilderState = {
-    kinds: {},
-    ranges: {},
-    overrides: {},
-    spacingKm: DEFAULT_SPACING_KM,
-  };
+  const state: BuilderState = { kinds: {}, ranges: {}, overrides: {}, spacing: {} };
   for (const kind of kinds) {
     state.kinds[kind.id] = true;
     state.ranges[kind.id] = Object.fromEntries(
       kind.filters.map((filter) => [filter.key, [...filter.default] as [number, number]]),
     );
+    if (kind.defaultSpacingKm !== undefined) {
+      state.spacing![kind.id] = kind.defaultSpacingKm;
+    }
   }
   return state;
 }
@@ -141,12 +149,13 @@ export function setKind(state: BuilderState, kind: string, on: boolean): Builder
   return { ...state, kinds: { ...state.kinds, [kind]: on } };
 }
 
-export function setSpacing(state: BuilderState, spacingKm: number): BuilderState {
-  return { ...state, spacingKm };
+export function setSpacing(state: BuilderState, kind: string, spacingKm: number): BuilderState {
+  return { ...state, spacing: { ...state.spacing, [kind]: spacingKm } };
 }
 
-export function setPreferProminence(state: BuilderState, on: boolean): BuilderState {
-  return { ...state, preferProminence: on };
+/** Every kind back to showing everything that qualifies. Used when reopening. */
+export function clearSpacing(state: BuilderState): BuilderState {
+  return { ...state, spacing: {} };
 }
 
 export function setRange(
@@ -171,42 +180,13 @@ export type Resolved = {
   thinnedOut: number;
 };
 
-/**
- * The share prominence takes when "Prefer prominence" is on.
- *
- * Measured over the Adamello, Brenta and Ledro against a hand-picked twelve: at
- * 2 km the blend holds ten of them in 29 peaks where `max()` holds nine, and at
- * 3 km ten in 24 against eight in 23. Annecy goes from 47 survivors to 19.
- */
-const PROMINENCE_WEIGHT = 0.7;
+/** How a feature ranks against its neighbours when only one of them can be asked. */
+const strengthOf = (feature: QuizFeature): number =>
+  Math.max(feature.properties.flight ?? 0, feature.properties.prominence ?? 0);
 
 /**
- * How a feature ranks against its neighbours when only one of them can be asked.
- *
- * Off, it is whichever score is higher — the same reading as the sliders, which
- * union, so a feature is as strong as its best claim to being in at all.
- *
- * On, prominence carries most of it. Flight is the noisier half: it comes off a
- * smooth raster, so everything under one corridor scores nearly the same and
- * what separates a cluster's members is very little. That is how Monte Tremalzo
- * loses its place to Corno Spezzato, a sub-peak 1.3 km away and half as
- * prominent, and how Monte Cadria loses to Cima Cingla. Both come back weighted.
- *
- * A checkbox rather than a decision, until it has been used on real ground.
- */
-
-const strengthOf = (feature: QuizFeature, preferProminence: boolean): number => {
-  const flight = feature.properties.flight ?? 0;
-  const prominence = feature.properties.prominence ?? 0;
-  if (!preferProminence) return Math.max(flight, prominence);
-  return (1 - PROMINENCE_WEIGHT) * flight + PROMINENCE_WEIGHT * prominence;
-};
-
-/**
- * A feature with no scores has nothing to rank a cluster by, so it is not
- * thinned at all — which is every valley. Length already narrows those, and two
- * valleys near each other are not the same question the way two summits on one
- * ridge are.
+ * Whichever score is higher, which is the same reading as the two that admit it:
+ * they union, so a feature is as strong as its best claim to being in at all.
  */
 const isScored = (feature: QuizFeature): boolean =>
   feature.properties.flight !== undefined || feature.properties.prominence !== undefined;
@@ -251,25 +231,60 @@ export function resolve(features: readonly QuizFeature[], state: BuilderState): 
   };
 }
 
-/** The spacing pass, over the scored kinds only. See `thin.ts`. */
+/**
+ * The spacing pass, per kind. See `thin.ts`.
+ *
+ * A kind with no spacing set is never thinned, which is how valleys stay out of
+ * it — they carry no scores to rank a cluster by, and two valleys near each
+ * other are not the same question the way two summits on one ridge are.
+ *
+ * At the top of the scale the kind drops out entirely, pins aside. Pins survive
+ * every other control here and survive this one too.
+ */
 function space(admitted: readonly QuizFeature[], state: BuilderState): QuizFeature[] {
-  const spacingKm = state.spacingKm ?? 0;
-  if (spacingKm <= 0) return [...admitted];
+  const spacing = state.spacing ?? {};
+  const thinned = Object.keys(spacing).filter((kind) => (spacing[kind] ?? 0) > 0);
+  if (thinned.length === 0) return [...admitted];
 
-  const survived = new Set(
-    thin(
-      admitted.filter(isScored).map((feature) => ({
+  const survived = new Set<string>();
+  for (const kind of thinned) {
+    const km = spacing[kind];
+    /*
+     * Scored features only, and the kind is skipped outright if it has none.
+     * A kind with no scores has nothing to rank a cluster by, so thinning it
+     * would come down to the id tiebreak — an arbitrary answer wearing the
+     * clothes of a considered one. Valleys are the case; they get no spacing
+     * default and so no control, and this is the belt to that pair of braces.
+     */
+    const mine = admitted.filter(
+      (feature) => feature.properties.kind === kind && isScored(feature),
+    );
+    if (mine.length === 0) continue;
+    const pinned = mine.filter((feature) => state.overrides[feature.id] === 'in');
+    if (km >= SPACING_NONE) {
+      for (const feature of pinned) survived.add(feature.id);
+      continue;
+    }
+    for (const item of thin(
+      mine.map((feature) => ({
         id: feature.id,
-        kind: feature.properties.kind,
+        kind,
         at: feature.properties.anchor,
-        strength: strengthOf(feature, state.preferProminence ?? false),
+        strength: strengthOf(feature),
         locked: state.overrides[feature.id] === 'in',
       })),
-      spacingKm,
-    ).map((item) => item.id),
-  );
+      km,
+    )) {
+      survived.add(item.id);
+    }
+  }
 
-  return admitted.filter((feature) => !isScored(feature) || survived.has(feature.id));
+  return admitted.filter(
+    (feature) =>
+      !isScored(feature) ||
+      !thinned.includes(feature.properties.kind) ||
+      survived.has(feature.id),
+  );
 }
 
 /**

@@ -175,6 +175,7 @@ async function buildTerrain(coverage: Coverage | null) {
       label: kind.label,
       geometry: kind.geometry,
       filters: kind.filters,
+      defaultSpacingKm: kind.defaultSpacingKm,
       count: mine.length,
       cells,
     });

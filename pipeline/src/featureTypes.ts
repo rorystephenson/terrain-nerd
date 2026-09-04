@@ -14,6 +14,14 @@ export type FilterSpec = {
   min: number;
   max: number;
   step: number;
+  /**
+   * Kept as a rule but taken off the panel.
+   *
+   * Flight and prominence are settled numbers now, not things to tune per quiz
+   * — they still decide what qualifies, but the only control worth having in
+   * front of you is how much of what qualifies to ask about.
+   */
+  hidden?: boolean;
   /** Where the slider sits on a fresh builder. */
   default: [number, number];
 };
@@ -26,26 +34,40 @@ export type FeatureKind = {
   mergeGapKm: number;
   /** Set when this kind needs computed scores rather than a raw tag. */
   scored: boolean;
+  /**
+   * How far apart to stand this kind's features, in km, on a fresh builder.
+   *
+   * Absent means the kind is never thinned — which is valleys, having no scores
+   * to rank a cluster by and a length filter that already narrows them.
+   */
+  defaultSpacingKm?: number;
   filters: FilterSpec[];
 };
 
 export type KindId = 'valley' | 'peak' | 'pass';
 
 /**
- * Peaks and passes filter on two scores rather than one, and the two sliders
- * **union** — each adds what it admits, rather than narrowing what the other
- * left. See `matchesFilter` in `web/src/lib/builder.ts` for why that is the only
+ * Peaks and passes qualify on two scores rather than one, and the two **union**
+ * — each admits what it admits, rather than narrowing what the other left. See
+ * `matchesFilter` in `web/src/lib/builder.ts` for why that is the only
  * combination that can express a real selection, and `scores.ts` for what each
  * score measures.
  *
- * Length is the meaningful filter for valleys, and stays a single one.
+ * **Both are hidden.** They were sliders for as long as it took to find where
+ * they belong, and 0.27 flight or 0.39 prominence is where using them landed:
+ * loose enough to admit anything anyone would name, on the understanding that
+ * the spacing is what decides how many of those get asked. Two settled numbers
+ * behind one control beats three controls, two of which you set once.
  *
- * Defaults read as "the ones people fly, plus the landmarks", and they are set
- * where those two thresholds sit: 0.5 admits a mountain that is genuinely flown,
- * 0.7 admits one that stands over everything near it whether anyone flies it or
- * not. Over Val Rendena that is 21 peaks and 5 passes; over a hand-picked quiz
- * spanning the Adamello, Brenta and Ledro it holds ten of the twelve peaks a
- * person actually chose, the other two being a judgement call no score reaches.
+ * Length is the meaningful filter for valleys, stays visible, and stays single —
+ * valleys are not thinned, having no scores to rank a cluster by.
+ *
+ * Spacing defaults are set from the counts they produce over Val Rendena, where
+ * 3 km leaves 28 of 117 admitted peaks. Passes want a wider radius for the same
+ * job, not a narrower one: there are fewer of them and they already stand
+ * further apart, so the same 3 km leaves 17 of 35 — half, against a quarter. At
+ * 5 km they come down to 10, which is about the share of a quiz passes should
+ * be.
  */
 export const kinds = {
   valley: {
@@ -64,9 +86,10 @@ export const kinds = {
     geometry: 'point',
     mergeGapKm: 0,
     scored: true,
+    defaultSpacingKm: 3,
     filters: [
-      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.5, 1] },
-      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.7, 1] },
+      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, hidden: true, default: [0.27, 1] },
+      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, hidden: true, default: [0.39, 1] },
     ],
   },
   pass: {
@@ -75,9 +98,10 @@ export const kinds = {
     geometry: 'point',
     mergeGapKm: 0,
     scored: true,
+    defaultSpacingKm: 5,
     filters: [
-      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, default: [0.5, 1] },
-      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, default: [0.75, 1] },
+      { key: 'flight', label: 'Flight proximity', unit: '', min: 0, max: 1, step: 0.01, hidden: true, default: [0.27, 1] },
+      { key: 'prominence', label: 'Prominence', unit: '', min: 0, max: 1, step: 0.01, hidden: true, default: [0.39, 1] },
     ],
   },
 } satisfies Record<KindId, FeatureKind>;
