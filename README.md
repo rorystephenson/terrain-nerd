@@ -155,6 +155,15 @@ What comes back is still properly separated, which is not obvious: if two kept
 features were closer than the spacing, the weaker would have the stronger one
 within the spacing and so would not have been kept.
 
+A **"Prefer prominence"** checkbox sits under the slider and changes only which
+of two close features survives: `0.3 * flight + 0.7 * prominence` instead of
+whichever score is higher. Flight is the noisier half — it comes off a smooth
+raster, so everything under one corridor reads much the same and a cluster's
+members are separated by very little. That is how Monte Tremalzo loses its place
+to Corno Spezzato, a sub-peak 1.3 km away and half as prominent, and both come
+back weighted. It is a checkbox rather than a decision until it has been used on
+real ground; with the spacing off it does nothing at all, and says so.
+
 Two more rules make it safe to leave on:
 
 - **A pin is never thinned**, like every other control here.
@@ -732,7 +741,7 @@ unit-tested — including five that live in the pipeline (`placeZoom.ts`,
 this is where the test runner is:
 
 ```bash
-npm test             # 200 tests
+npm test             # 202 tests
 npm run typecheck    # pipeline, web and the tools
 ```
 

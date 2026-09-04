@@ -110,6 +110,8 @@ export type BuilderState = {
    * field and must reopen exactly as it was left, which is thinning off.
    */
   spacingKm?: number;
+  /** Weigh prominence over flight when deciding who represents a cluster. */
+  preferProminence?: boolean;
 };
 
 /** One replayable quiz: a frozen set of features. */

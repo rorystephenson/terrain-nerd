@@ -12,6 +12,7 @@ import {
   questionCount,
   resolve,
   setKind,
+  setPreferProminence,
   setRange,
   setSpacing,
   toggleOverride,
@@ -254,6 +255,39 @@ test('a pinned feature survives the spacing that would have dropped it', () => {
   state = toggleOverride(state, shoulder, false);
   const { included } = resolve([shoulder, summit], state);
   assert.deepEqual(new Set(included.map((f) => f.id)), new Set(['near', 'big']));
+});
+
+test('preferring prominence changes which of a cluster survives', () => {
+  /*
+   * The real pair it was written for. Monte Tremalzo is the named mountain and
+   * Corno Spezzato a sub-peak 1.3 km away, half as prominent — but more flown,
+   * because flight comes off a smooth raster and everything under one corridor
+   * reads much the same. Whichever score is higher hands the cluster to the
+   * sub-peak; weighting prominence hands it back.
+   */
+  const tremalzo = peak('tremalzo', 'Monte Tremalzo', 0.526, 0.513, [11, 46]);
+  const spezzato = peak('spezzato', 'Corno Spezzato', 0.637, 0.312, [11.012, 46]);
+  const features = [tremalzo, spezzato];
+
+  let state = setSpacing(initialState(kinds), 3);
+  assert.deepEqual(resolve(features, state).included.map((f) => f.id), ['spezzato']);
+
+  state = setPreferProminence(state, true);
+  assert.deepEqual(resolve(features, state).included.map((f) => f.id), ['tremalzo']);
+});
+
+test('preferring prominence does nothing with the spacing off', () => {
+  // It only ever decides who represents a cluster, so with no clusters to
+  // represent it must not quietly become a filter.
+  const features = [
+    peak('a', 'Flown', 0.9, 0.1, [11, 46]),
+    peak('b', 'Prominent', 0.1, 0.9, [11.5, 46]),
+  ];
+  const off = setSpacing(initialState(kinds), 0);
+  assert.deepEqual(
+    resolve(features, setPreferProminence(off, true)).included.map((f) => f.id),
+    resolve(features, off).included.map((f) => f.id),
+  );
 });
 
 test('the extent is measured after thinning, not before', () => {

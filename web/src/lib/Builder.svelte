@@ -11,6 +11,7 @@
     questionCount,
     resolve,
     setKind,
+    setPreferProminence,
     setRange,
     setSpacing,
     toggleOverride,
@@ -513,6 +514,19 @@
         value={spacingKm}
         oninput={(e) => (builder = setSpacing(builder, Number(e.currentTarget.value)))}
       />
+      <!--
+        Which of two close features survives, and nothing else — so it does
+        nothing at all with the spacing off, and says so rather than sitting
+        there looking live.
+      -->
+      <label class="toggle sub-toggle" class:off={spacingKm === 0}>
+        <input
+          type="checkbox"
+          checked={builder.preferProminence ?? false}
+          onchange={(e) => (builder = setPreferProminence(builder, e.currentTarget.checked))}
+        />
+        <span>Prefer prominence</span>
+      </label>
     </div>
 
     <div class="tally">
@@ -653,6 +667,8 @@
   .value.none { color: #8a94a2; font-weight: 500; font-style: italic; }
   /* Set apart from the per-kind sliders: it acts on the whole selection. */
   .spacing { border-top: 1px solid #e6e9ee; padding-top: 0.7rem; margin-top: 0.2rem; }
+  .sub-toggle { margin-top: 0.45rem; font-size: 0.82rem; font-weight: 500; color: #4a5361; }
+  .sub-toggle.off { opacity: 0.45; }
   input[type='range'] { width: 100%; margin-top: 0.15rem; }
 
   .tally {

@@ -145,6 +145,10 @@ export function setSpacing(state: BuilderState, spacingKm: number): BuilderState
   return { ...state, spacingKm };
 }
 
+export function setPreferProminence(state: BuilderState, on: boolean): BuilderState {
+  return { ...state, preferProminence: on };
+}
+
 export function setRange(
   state: BuilderState,
   kind: string,
@@ -168,20 +172,35 @@ export type Resolved = {
 };
 
 /**
+ * The share prominence takes when "Prefer prominence" is on.
+ *
+ * Measured over the Adamello, Brenta and Ledro against a hand-picked twelve: at
+ * 2 km the blend holds ten of them in 29 peaks where `max()` holds nine, and at
+ * 3 km ten in 24 against eight in 23. Annecy goes from 47 survivors to 19.
+ */
+const PROMINENCE_WEIGHT = 0.7;
+
+/**
  * How a feature ranks against its neighbours when only one of them can be asked.
  *
- * Whichever score is higher, which is the same reading as the sliders: they
+ * Off, it is whichever score is higher — the same reading as the sliders, which
  * union, so a feature is as strong as its best claim to being in at all.
  *
- * Worth knowing that flight is the noisier half of this. It comes off a smooth
- * raster, so everything under one corridor scores nearly the same and the
- * discrimination inside a cluster comes from very little — which is how Monte
- * Tremalzo loses its place to Corno Spezzato, a sub-peak 1.3 km away that is
- * half as prominent. `0.3 * flight + 0.7 * prominence` keeps both, and is the
- * change to make here if cluster representatives read wrong.
+ * On, prominence carries most of it. Flight is the noisier half: it comes off a
+ * smooth raster, so everything under one corridor scores nearly the same and
+ * what separates a cluster's members is very little. That is how Monte Tremalzo
+ * loses its place to Corno Spezzato, a sub-peak 1.3 km away and half as
+ * prominent, and how Monte Cadria loses to Cima Cingla. Both come back weighted.
+ *
+ * A checkbox rather than a decision, until it has been used on real ground.
  */
-const strengthOf = (feature: QuizFeature): number =>
-  Math.max(feature.properties.flight ?? 0, feature.properties.prominence ?? 0);
+
+const strengthOf = (feature: QuizFeature, preferProminence: boolean): number => {
+  const flight = feature.properties.flight ?? 0;
+  const prominence = feature.properties.prominence ?? 0;
+  if (!preferProminence) return Math.max(flight, prominence);
+  return (1 - PROMINENCE_WEIGHT) * flight + PROMINENCE_WEIGHT * prominence;
+};
 
 /**
  * A feature with no scores has nothing to rank a cluster by, so it is not
@@ -243,7 +262,7 @@ function space(admitted: readonly QuizFeature[], state: BuilderState): QuizFeatu
         id: feature.id,
         kind: feature.properties.kind,
         at: feature.properties.anchor,
-        strength: strengthOf(feature),
+        strength: strengthOf(feature, state.preferProminence ?? false),
         locked: state.overrides[feature.id] === 'in',
       })),
       spacingKm,
