@@ -5,13 +5,14 @@
   import {
     clearOverrides,
     initialState,
-    inclusionOf,
     isIncluded,
+    shadeOf,
     padBox,
     questionCount,
     resolve,
     setKind,
     setRange,
+    setSpacing,
     toggleOverride,
   } from './builder.ts';
   import { placeFetchBox } from './places.ts';
@@ -19,7 +20,6 @@
   import type {
     BuilderState,
     FilterSpec,
-    Inclusion,
     KindId,
     PlaceFeature,
     PoolIndex,
@@ -50,7 +50,20 @@
   // App remounts this component per edit target, so there is nothing to react to.
   const seed = untrack(() => ({
     step: (editing ? 'features' : 'area') as 'area' | 'features',
-    builder: editing?.builder ?? initialState(index.kinds),
+    /*
+     * Reopening restores the sliders but starts with the spacing off.
+     *
+     * A saved quiz is a decided set, and the spacing is part of the query that
+     * decided it — running it again over a pool rebuilt from a different area
+     * can only disagree. It does not lose anything (reconcile pins the saved set
+     * back in), but a pin takes no ground, so freeing the ground of everything
+     * pinned *out* lets a third feature through that was crowded before: the
+     * quiz quietly grows by one each time it is opened.
+     *
+     * Raising it again is a decision the person editing can make, and then it
+     * means what it says.
+     */
+    builder: { ...(editing?.builder ?? initialState(index.kinds)), spacingKm: 0 },
     name: editing?.name ?? '',
   }));
 
@@ -219,6 +232,13 @@
    * a pin — which is exactly what a pin means. Features the filters already
    * agree about are left alone, so the sliders still do something afterwards,
    * and pins the user made themselves are preserved.
+   *
+   * "What the filters say" has to mean the *thinned* selection, not the slider
+   * verdict on its own. A feature the sliders admit but the spacing drops looks
+   * like agreement to a check that only asks `inclusionOf`, so it gets no pin
+   * and is then thinned away anyway — the saved quiz quietly losing features,
+   * which is the same failure as the 71 reopening as 104, in the other
+   * direction. Pinning it in is also what protects it: `thin` never drops a pin.
    */
   let reconciled = $state(false);
   $effect(() => {
@@ -227,9 +247,10 @@
     const overrides = { ...builder.overrides };
     let pinned = 0;
 
+    const offered = new Set(resolve(pool, builder).included.map((f) => f.id));
     for (const feature of pool) {
       const wanted = saved.has(feature.id);
-      if (wanted === isIncluded(inclusionOf(feature, builder))) continue;
+      if (wanted === offered.has(feature.id)) continue;
       overrides[feature.id] = wanted ? 'in' : 'out';
       pinned++;
     }
@@ -271,13 +292,8 @@
     };
   });
 
-  const shade = $derived.by(() => {
-    const out: Record<string, Inclusion> = {};
-    for (const feature of visible) out[feature.id] = inclusionOf(feature, builder);
-    return out;
-  });
-
   const picked = $derived(resolve(visible, builder));
+  const shade = $derived(shadeOf(visible, builder, picked));
   const questions = $derived(questionCount(picked.included));
 
   function useThisArea() {
@@ -291,7 +307,7 @@
   function pick(id: string | null) {
     if (!id) return;
     const feature = visible.find((f) => f.id === id);
-    if (feature) builder = toggleOverride(builder, feature);
+    if (feature) builder = toggleOverride(builder, feature, isIncluded(shade[feature.id]));
   }
 
   function save() {
@@ -308,6 +324,14 @@
       builder,
     });
   }
+
+  /**
+   * Past this the spacing is emptying the map rather than thinning it: at 10 km
+   * a valley-sized area is down to a handful whatever the scores say.
+   */
+  const MAX_SPACING_KM = 10;
+
+  const spacingKm = $derived(builder.spacingKm ?? 0);
 
   /** Where a valley is as long as naming an area cares about. */
   const VALLEY_FULL_KM = 40;
@@ -468,11 +492,37 @@
     {/each}
 
 
+    <!--
+      Spacing sits outside the per-kind sliders because it is not a property of
+      a kind: it is about the selection as a whole, and it is the only control
+      here that takes away something the sliders already said yes to. Hence the
+      count of what it removed, right beside the question count.
+    -->
+    <div class="filter spacing">
+      <div class="filter-head">
+        <span>Thin out</span>
+        <span class="value" class:none={spacingKm === 0}>
+          {spacingKm === 0 ? 'off' : `${spacingKm.toFixed(1)}km apart`}
+        </span>
+      </div>
+      <input
+        type="range"
+        min="0"
+        max={MAX_SPACING_KM}
+        step="0.5"
+        value={spacingKm}
+        oninput={(e) => (builder = setSpacing(builder, Number(e.currentTarget.value)))}
+      />
+    </div>
+
     <div class="tally">
       {#if loading}
         <span class="loading">Loading the area…</span>
       {:else}
         <strong>{questions}</strong> question{questions === 1 ? '' : 's'}
+        {#if picked.thinnedOut}
+          <span class="locks">· {picked.thinnedOut} thinned out</span>
+        {/if}
         {#if picked.lockedIn || picked.lockedOut}
           <span class="locks">
             · {picked.lockedIn + picked.lockedOut} pinned
@@ -601,6 +651,8 @@
   }
   /* The stop that selects nothing reads as off rather than as a number. */
   .value.none { color: #8a94a2; font-weight: 500; font-style: italic; }
+  /* Set apart from the per-kind sliders: it acts on the whole selection. */
+  .spacing { border-top: 1px solid #e6e9ee; padding-top: 0.7rem; margin-top: 0.2rem; }
   input[type='range'] { width: 100%; margin-top: 0.15rem; }
 
   .tally {

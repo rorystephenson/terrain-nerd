@@ -102,6 +102,14 @@ export type BuilderState = {
   ranges: Record<string, Record<string, [number, number]>>;
   /** Features the user pinned, either way. Survives every filter change. */
   overrides: Record<string, 'in' | 'out'>;
+  /**
+   * How far apart the chosen features have to stand, in km. 0 is off.
+   *
+   * Optional because saved builder state is read back from localStorage
+   * verbatim, with no migration — a quiz saved before this existed has no such
+   * field and must reopen exactly as it was left, which is thinning off.
+   */
+  spacingKm?: number;
 };
 
 /** One replayable quiz: a frozen set of features. */

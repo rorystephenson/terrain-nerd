@@ -13,6 +13,7 @@ import {
   resolve,
   setKind,
   setRange,
+  setSpacing,
   toggleOverride,
 } from './builder.ts';
 import type { KindInfo, QuizFeature } from './types.ts';
@@ -51,13 +52,19 @@ function valley(id: string, name: string, lengthKm: number): QuizFeature {
   };
 }
 
-function peak(id: string, name: string, flight: number, prominence: number): QuizFeature {
+function peak(
+  id: string,
+  name: string,
+  flight: number,
+  prominence: number,
+  at: [number, number] = [11, 46],
+): QuizFeature {
   return {
     type: 'Feature',
     id,
-    bbox: [11, 46, 11, 46],
-    geometry: { type: 'Point', coordinates: [11, 46] },
-    properties: { name, kind: 'peak', lengthKm: 0, anchor: [11, 46], flight, prominence },
+    bbox: [at[0], at[1], at[0], at[1]],
+    geometry: { type: 'Point', coordinates: at },
+    properties: { name, kind: 'peak', lengthKm: 0, anchor: at, flight, prominence },
   };
 }
 
@@ -124,8 +131,8 @@ test('all four inclusion states are reachable', () => {
   assert.equal(inclusionOf(long, state), 'auto-in');
   assert.equal(inclusionOf(short, state), 'auto-out');
 
-  state = toggleOverride(state, long);
-  state = toggleOverride(state, short);
+  state = toggleOverride(state, long, matchesFilter(long, state));
+  state = toggleOverride(state, short, matchesFilter(short, state));
   assert.equal(inclusionOf(long, state), 'locked-out');
   assert.equal(inclusionOf(short, state), 'locked-in');
 
@@ -137,10 +144,10 @@ test('tapping locks the opposite of the filter, and tapping again resets', () =>
   const state = initialState(kinds);
   const short = valley('b', 'Short', 2); // the filter says out
 
-  const locked = toggleOverride(state, short);
+  const locked = toggleOverride(state, short, matchesFilter(short, state));
   assert.equal(inclusionOf(short, locked), 'locked-in');
 
-  const reset = toggleOverride(locked, short);
+  const reset = toggleOverride(locked, short, matchesFilter(short, locked));
   assert.equal(inclusionOf(short, reset), 'auto-out');
   assert.deepEqual(reset.overrides, {}, 'the reset clears the entry, not just its value');
 });
@@ -149,7 +156,7 @@ test('a lock survives a filter change that flips the filter verdict', () => {
   // The whole point: hand-pick a 2 km valley, then keep dragging the slider.
   let state = initialState(kinds);
   const short = valley('b', 'Short', 2);
-  state = toggleOverride(state, short);
+  state = toggleOverride(state, short, matchesFilter(short, state));
   assert.equal(inclusionOf(short, state), 'locked-in');
 
   state = setRange(state, 'valley', 'lengthKm', [1, 40]); // now it would pass anyway
@@ -163,7 +170,7 @@ test('a lock survives a filter change that flips the filter verdict', () => {
 test('a feature locked out stays out however wide the filter opens', () => {
   let state = initialState(kinds);
   const long = valley('a', 'Long', 9);
-  state = toggleOverride(state, long);
+  state = toggleOverride(state, long, matchesFilter(long, state));
   state = setRange(state, 'valley', 'lengthKm', [0, 40]);
   assert.equal(inclusionOf(long, state), 'locked-out');
   assert.equal(isIncluded(inclusionOf(long, state)), false);
@@ -173,7 +180,8 @@ test('clearing overrides hands every feature back to the filter', () => {
   let state = initialState(kinds);
   const short = valley('b', 'Short', 2);
   const long = valley('a', 'Long', 9);
-  state = toggleOverride(toggleOverride(state, short), long);
+  state = toggleOverride(state, short, matchesFilter(short, state));
+  state = toggleOverride(state, long, matchesFilter(long, state));
   state = clearOverrides(state);
   assert.equal(inclusionOf(short, state), 'auto-out');
   assert.equal(inclusionOf(long, state), 'auto-in');
@@ -187,14 +195,77 @@ test('resolve returns the selection, its extent, and how much was hand-picked', 
     peak('c', 'Famous', 0.9, 0.8),
     peak('d', 'Bump', 0.04, 0.05),
   ];
-  state = toggleOverride(state, features[1]); // pin the short valley in
-  state = toggleOverride(state, features[2]); // pin the famous peak out
+  // The tap pins to the opposite of what the selection is doing now.
+  state = toggleOverride(state, features[1], false); // pin the short valley in
+  state = toggleOverride(state, features[2], true); // pin the famous peak out
 
   const { included, bbox, lockedIn, lockedOut } = resolve(features, state);
   assert.deepEqual(included.map((f) => f.id), ['a', 'b']);
   assert.equal(lockedIn, 1);
   assert.equal(lockedOut, 1);
   assert.deepEqual(bbox, [11, 46, 11.1, 46.1]);
+});
+
+test('features standing on top of each other are thinned to the strongest', () => {
+  // Two summits 150 m apart are one question: whichever name you would use.
+  let state = initialState(kinds);
+  state = setSpacing(state, 2);
+  const features = [
+    peak('near', 'Shoulder', 0.8, 0.6, [11, 46]),
+    peak('big', 'Summit', 0.9, 0.9, [11.002, 46]),
+    peak('far', 'Next valley', 0.8, 0.6, [11.2, 46]),
+  ];
+  const { included, thinnedOut } = resolve(features, state);
+  assert.deepEqual(included.map((f) => f.id), ['big', 'far']);
+  assert.equal(thinnedOut, 1);
+});
+
+test('thinning off leaves the selection exactly as the sliders left it', () => {
+  let state = setSpacing(initialState(kinds), 0);
+  const features = [
+    peak('near', 'Shoulder', 0.8, 0.6, [11, 46]),
+    peak('big', 'Summit', 0.9, 0.9, [11.002, 46]),
+  ];
+  const { included, thinnedOut } = resolve(features, state);
+  assert.equal(included.length, 2);
+  assert.equal(thinnedOut, 0);
+});
+
+test('valleys are never thinned, however close together they run', () => {
+  // They carry no scores, so there is nothing to rank a cluster by — and two
+  // valleys near each other are not the same question the way two summits on
+  // one ridge are.
+  const state = setSpacing(initialState(kinds), 8);
+  const features = [valley('a', 'One', 9), valley('b', 'Two', 9)];
+  const { included, thinnedOut } = resolve(features, state);
+  assert.equal(included.length, 2);
+  assert.equal(thinnedOut, 0);
+});
+
+test('a pinned feature survives the spacing that would have dropped it', () => {
+  // What reopening a saved quiz leans on: the reconcile pass pins whatever the
+  // thinned selection does not offer, and those pins have to hold.
+  let state = setSpacing(initialState(kinds), 5);
+  const shoulder = peak('near', 'Shoulder', 0.5, 0.5, [11, 46]);
+  const summit = peak('big', 'Summit', 0.9, 0.9, [11.002, 46]);
+  assert.deepEqual(resolve([shoulder, summit], state).included.map((f) => f.id), ['big']);
+
+  // Tapping what the spacing dropped pins it in, which is the whole point.
+  state = toggleOverride(state, shoulder, false);
+  const { included } = resolve([shoulder, summit], state);
+  assert.deepEqual(new Set(included.map((f) => f.id)), new Set(['near', 'big']));
+});
+
+test('the extent is measured after thinning, not before', () => {
+  // The frame has to cover what is actually asked. A thinned outlier that still
+  // stretched the bbox would open the quiz on ground it never asks about.
+  let state = setSpacing(initialState(kinds), 3);
+  const features = [
+    peak('big', 'Summit', 0.9, 0.9, [11, 46]),
+    peak('near', 'Shoulder', 0.8, 0.6, [11.01, 46.01]),
+  ];
+  const { bbox } = resolve(features, state);
+  assert.deepEqual(bbox, [11, 46, 11, 46]);
 });
 
 test('the extent covers exactly the included features, not the excluded ones', () => {

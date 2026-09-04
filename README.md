@@ -117,6 +117,38 @@ hand. The score they replaced could not do that at all: it was a percentile, so
 its top bucket held 373 peaks by construction, and dragging to the end still left
 every one of them selected.
 
+### Thin out
+
+Neither score can judge a feature against its neighbours, and that is the one
+thing left that separates a good selection from a plausible one. Ten summits in
+one massif that are all prominent and all flown are not ten questions — nobody
+names more than one or two of them to say where they went. Meanwhile a modest
+mountain alone at the end of a ridge earns its place precisely because there is
+nothing else to call it.
+
+So there is a third control, on the selection as a whole rather than on a kind:
+**keep one every N km**. It is a greedy strongest-first pass, the same shape as
+the label thinning in `placeZoom.ts`, and it takes the Adamello frame from 59
+peaks to 33 at 2 km while still holding nine of the twelve a person picked by
+hand. Each kind is thinned against itself — a pass and the peak above it are two
+different questions about one col — and valleys are not thinned at all, having no
+scores to rank a cluster by.
+
+Two rules make it safe to leave on:
+
+- **A pin is never thinned**, like every other control here.
+- **A pin takes no ground either.** Adding something by hand must not quietly
+  remove something else, and there is a sharper reason too: reopening a saved
+  quiz pins back everything the spacing dropped, so pins that crowded their
+  neighbours would lose a *different* feature on every reopen.
+
+Reopening also starts with the spacing **off**. A saved quiz is a decided set and
+the spacing is part of the query that decided it; re-running it over a pool
+rebuilt from a slightly different area can only disagree. It never lost anything
+— the reconcile pins the saved set back in — but because a pin frees the ground
+it used to hold, one extra feature slipped through on every open. Raising the
+slider again is a decision, and then it means what it says.
+
 ## Playing
 
 Four tries per question. Every wrong click briefly labels the feature you
@@ -666,6 +698,7 @@ web/src/lib/
   quiz.ts          quiz state machine                   (pure)
   labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid        (pure)
+  thin.ts          one voice per cluster                (pure)
   tiles.ts         the tn:// protocol and coverage
   chunks.ts        cell loading and caching
   storage.ts       localStorage
@@ -678,7 +711,7 @@ unit-tested — including five that live in the pipeline (`placeZoom.ts`,
 this is where the test runner is:
 
 ```bash
-npm test             # 177 tests
+npm test             # 197 tests
 npm run typecheck    # pipeline, web and the tools
 ```
 
