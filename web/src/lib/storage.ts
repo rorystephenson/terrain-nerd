@@ -9,6 +9,7 @@ import type { QuizSpec } from './types.ts';
 
 const QUIZ_KEY = 'terrain-nerd:quizzes';
 const BEST_KEY = 'terrain-nerd:best';
+const SEEN_KEY = 'terrain-nerd:seen';
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -56,6 +57,28 @@ export function recordBest(
   const next = { ...best, [quizId]: pct };
   write(BEST_KEY, next);
   return next;
+}
+
+/**
+ * Explainers that have already had their one showing.
+ *
+ * The builder's panels each carry a paragraph saying how that step works. It is
+ * worth reading once and is dead weight forever after — and on a phone it is
+ * dead weight occupying a third of the panel, above the controls it explains.
+ * So each is shown until it has been, and then the space goes back to the map.
+ *
+ * Stored per explainer rather than as one "has built a quiz before" flag,
+ * because the two steps are not necessarily met together: someone editing a
+ * saved quiz lands straight on the features panel and may never have seen the
+ * area one.
+ */
+export const hasSeen = (id: string): boolean =>
+  read<Record<string, boolean>>(SEEN_KEY, {})[id] === true;
+
+export function markSeen(id: string): void {
+  const seen = read<Record<string, boolean>>(SEEN_KEY, {});
+  if (seen[id]) return;
+  write(SEEN_KEY, { ...seen, [id]: true });
 }
 
 export const newQuizId = (): string =>

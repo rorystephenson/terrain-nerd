@@ -19,7 +19,7 @@
     toggleOverride,
   } from './builder.ts';
   import { placeFetchBox } from './places.ts';
-  import { newQuizId } from './storage.ts';
+  import { hasSeen, markSeen, newQuizId } from './storage.ts';
   import type {
     BuilderState,
     FilterSpec,
@@ -74,6 +74,26 @@
   }));
 
   let step = $state<'area' | 'features'>(seed.step);
+
+  /**
+   * The two step explainers, each read once at mount and never re-read.
+   *
+   * Read once on purpose: they are marked seen as soon as the step carrying one
+   * is on screen, and a live read would then delete the paragraph out from under
+   * whoever is halfway through it.
+   */
+  const HINT_AREA = 'build:area';
+  const HINT_FEATURES = 'build:features';
+  const hints = untrack(() => ({
+    area: !hasSeen(HINT_AREA),
+    features: !hasSeen(HINT_FEATURES),
+  }));
+
+  $effect(() => {
+    if (step === 'area' && hints.area) markSeen(HINT_AREA);
+    if (step === 'features' && hints.features) markSeen(HINT_FEATURES);
+  });
+
   /**
    * What the map frames. Deliberately *not* fed from the map's own reported
    * view: framing pads outwards, so feeding the result back in would inflate
@@ -142,16 +162,15 @@
   let loading = $state(false);
   let name = $state(seed.name);
   /**
-   * Folded away to a pill, so the map underneath can be worked on.
+   * Folded down to its own head, so the map underneath can be worked on.
    *
    * Picking features is half panel and half map — you set the sliders, then you
    * tap the ones the filter got wrong. On a phone the panel is nearly the whole
    * screen, so the tapping half is done blind, and there is no scrolling out of
    * its way: it is pinned to the viewport, not to the page.
    *
-   * The pill keeps the question count, because that number is the answer to the
-   * thing you minimised for — every pin moves it, and a fold that hid the
-   * feedback would just make you unfold again after each tap.
+   * What stays is the panel's head, unchanged and in place, so the fold reads as
+   * this panel rolled up rather than as something else taking its corner.
    */
   let minimised = $state(false);
 
@@ -306,7 +325,7 @@
     if (!pending) return;
     area = pending;
     step = 'features';
-    // A new area is a new count: come back to the panel that reports it.
+    // A new area is a new set of features to filter: come back to the controls.
     minimised = false;
   }
 
@@ -415,146 +434,144 @@
 {#if step === 'area'}
   <div class="panel" bind:clientWidth={panelWidth} bind:clientHeight={panelHeight}>
     <h2>Choose an area</h2>
-    <p class="hint">
-      Drag the red frame's handles over the ground you want to be quizzed on, panning and
-      zooming the map underneath it. Everything the frame crosses becomes available to pick
-      from.
-    </p>
+    {#if hints.area}
+      <p class="hint">
+        Drag the red frame's handles over the ground you want to be quizzed on, panning and
+        zooming the map underneath it. Everything the frame crosses becomes available to pick
+        from.
+      </p>
+    {/if}
     <div class="actions">
       <button class="ghost" onclick={oncancel}>Cancel</button>
       <button class="primary" disabled={!pending} onclick={useThisArea}>Use this area</button>
     </div>
   </div>
-{:else if minimised}
-  <!--
-    The folded panel. It sits where the panel's own top corner was, so unfolding
-    reads as the same thing growing back rather than a new one arriving.
-  -->
-  <button class="restack" onclick={() => (minimised = false)}>
-    {#if loading}
-      <span class="mini-loading">Loading the area…</span>
-    {:else}
-      <span class="mini-count">{questions}</span>
-      <span class="mini-label">question{questions === 1 ? '' : 's'}</span>
-    {/if}
-    <span class="mini-hint">Show panel</span>
-  </button>
 {:else}
+  <!--
+    Folding hides the panel's body and leaves its head exactly as it was: same
+    plate, same corner, same width, same two controls, with the minus turned
+    into a plus. A pill that shrank to a different shape read as a new thing
+    arriving where the panel used to be, and the eye had to find it again.
+  -->
   <div class="panel">
     <div class="head">
       <h2>{editing ? 'Edit quiz' : 'Pick features'}</h2>
       <div class="head-actions">
         <button class="link" onclick={() => (step = 'area')}>Change area</button>
         <button
-          class="minimise"
-          onclick={() => (minimised = true)}
-          title="Minimise"
-          aria-label="Minimise the panel"
-        >−</button>
+          class="fold"
+          onclick={() => (minimised = !minimised)}
+          title={minimised ? 'Maximise' : 'Minimise'}
+          aria-label={minimised ? 'Maximise the panel' : 'Minimise the panel'}
+        >{minimised ? '+' : '−'}</button>
       </div>
     </div>
 
-    {#each index.kinds as kind (kind.id)}
-      <section class:off={!builder.kinds[kind.id]}>
-        <label class="toggle">
-          <input
-            type="checkbox"
-            checked={builder.kinds[kind.id]}
-            onchange={(e) => (builder = setKind(builder, kind.id, e.currentTarget.checked))}
-          />
-          <span>{kind.label}</span>
-        </label>
+    {#if !minimised}
+      {#each index.kinds as kind (kind.id)}
+        <section class:off={!builder.kinds[kind.id]}>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={builder.kinds[kind.id]}
+              onchange={(e) => (builder = setKind(builder, kind.id, e.currentTarget.checked))}
+            />
+            <span>{kind.label}</span>
+          </label>
 
-        {#if builder.kinds[kind.id]}
-          {#each shown(kind) as filter, at (filter.key)}
-            {@const range = builder.ranges[kind.id]?.[filter.key] ?? filter.default}
-            {@const none = noneStop(filter)}
-            <!--
-              The sliders add to each other rather than narrowing each other, and
-              nothing about two stacked sliders says which. Without the word,
-              every reading of this panel is the wrong one.
-            -->
-            {#if at > 0}<div class="joiner">or</div>{/if}
-            <div class="filter">
-              <div class="filter-head">
-                <span>{filter.label}</span>
-                <span class="value" class:none={range[0] >= none}>
-                  {range[0] >= none ? 'none' : `${round(range[0], filter.step)}${filter.unit} +`}
-                </span>
+          {#if builder.kinds[kind.id]}
+            {#each shown(kind) as filter, at (filter.key)}
+              {@const range = builder.ranges[kind.id]?.[filter.key] ?? filter.default}
+              {@const none = noneStop(filter)}
+              <!--
+                The sliders add to each other rather than narrowing each other, and
+                nothing about two stacked sliders says which. Without the word,
+                every reading of this panel is the wrong one.
+              -->
+              {#if at > 0}<div class="joiner">or</div>{/if}
+              <div class="filter">
+                <div class="filter-head">
+                  <span>{filter.label}</span>
+                  <span class="value" class:none={range[0] >= none}>
+                    {range[0] >= none ? 'none' : `${round(range[0], filter.step)}${filter.unit} +`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={filter.min}
+                  max={none}
+                  step={filter.step}
+                  value={range[0]}
+                  oninput={(e) =>
+                    (builder = setRange(builder, kind.id, filter.key, [
+                      Number(e.currentTarget.value),
+                      range[1],
+                    ]))}
+                />
               </div>
-              <input
-                type="range"
-                min={filter.min}
-                max={none}
-                step={filter.step}
-                value={range[0]}
-                oninput={(e) =>
-                  (builder = setRange(builder, kind.id, filter.key, [
-                    Number(e.currentTarget.value),
-                    range[1],
-                  ]))}
-              />
-            </div>
-          {/each}
+            {/each}
 
-          {#if kind.defaultSpacingKm !== undefined}
-            {@const km = spacingOf(kind)}
-            <!--
-              The one control per kind, and it runs the whole way: everything
-              that qualifies at one end, none of it at the other. What decides
-              *what* qualifies is settled and no longer on the panel.
-            -->
-            <div class="filter">
-              <div class="filter-head">
-                <span>Thin out</span>
-                <span class="value" class:none={km === 0 || km >= SPACING_NONE}>
-                  {km >= SPACING_NONE ? 'none' : km === 0 ? 'show all' : `${km.toFixed(1)}km apart`}
-                </span>
+            {#if kind.defaultSpacingKm !== undefined}
+              {@const km = spacingOf(kind)}
+              <!--
+                The one control per kind, and it runs the whole way: everything
+                that qualifies at one end, none of it at the other. What decides
+                *what* qualifies is settled and no longer on the panel.
+              -->
+              <div class="filter">
+                <div class="filter-head">
+                  <span>Thin out</span>
+                  <span class="value" class:none={km === 0 || km >= SPACING_NONE}>
+                    {km >= SPACING_NONE ? 'none' : km === 0 ? 'show all' : `${km.toFixed(1)}km apart`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={SPACING_NONE}
+                  step={SPACING_STEP}
+                  value={km}
+                  oninput={(e) =>
+                    (builder = setSpacing(builder, kind.id, Number(e.currentTarget.value)))}
+                />
               </div>
-              <input
-                type="range"
-                min="0"
-                max={SPACING_NONE}
-                step={SPACING_STEP}
-                value={km}
-                oninput={(e) =>
-                  (builder = setSpacing(builder, kind.id, Number(e.currentTarget.value)))}
-              />
-            </div>
+            {/if}
+          {/if}
+        </section>
+      {/each}
+
+
+      <div class="tally">
+        {#if loading}
+          <span class="loading">Loading the area…</span>
+        {:else}
+          <strong>{questions}</strong> question{questions === 1 ? '' : 's'}
+          {#if picked.thinnedOut}
+            <span class="locks">· {picked.thinnedOut} thinned out</span>
+          {/if}
+          {#if picked.lockedIn || picked.lockedOut}
+            <span class="locks">
+              · {picked.lockedIn + picked.lockedOut} pinned
+              <button class="link" onclick={() => (builder = clearOverrides(builder))}>clear</button>
+            </span>
           {/if}
         {/if}
-      </section>
-    {/each}
-
-
-    <div class="tally">
-      {#if loading}
-        <span class="loading">Loading the area…</span>
-      {:else}
-        <strong>{questions}</strong> question{questions === 1 ? '' : 's'}
-        {#if picked.thinnedOut}
-          <span class="locks">· {picked.thinnedOut} thinned out</span>
-        {/if}
-        {#if picked.lockedIn || picked.lockedOut}
-          <span class="locks">
-            · {picked.lockedIn + picked.lockedOut} pinned
-            <button class="link" onclick={() => (builder = clearOverrides(builder))}>clear</button>
-          </span>
-        {/if}
+      </div>
+      {#if hints.features}
+        <p class="sub">
+          Tap a feature to pin it in or out, whatever the filter says. Tap it again to hand it
+          back to the filter.
+        </p>
       {/if}
-    </div>
-    <p class="sub">
-      Tap a feature to pin it in or out, whatever the filter says. Tap it again to hand it
-      back to the filter.
-    </p>
 
-    <input class="name" placeholder={suggestedName()} bind:value={name} />
-    <div class="actions">
-      <button class="ghost" onclick={oncancel}>Cancel</button>
-      <button class="primary" disabled={questions === 0} onclick={save}>
-        {editing ? 'Save changes' : 'Save quiz'}
-      </button>
-    </div>
+      <input class="name" placeholder={suggestedName()} bind:value={name} />
+      <div class="actions">
+        <button class="ghost" onclick={oncancel}>Cancel</button>
+        <button class="primary" disabled={questions === 0} onclick={save}>
+          {editing ? 'Save changes' : 'Save quiz'}
+        </button>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -566,63 +583,49 @@
     top: 0.75rem;
     left: 0.75rem;
     width: min(20rem, calc(100vw - 1.5rem));
-    max-height: calc(100vh - 1.5rem);
+    /*
+     * Bounded by the app frame rather than by `vh`, and scrolled inside it.
+     *
+     * The panel is as tall as its controls make it, which on a small phone is
+     * taller than the screen — so without a cap the name field and the save
+     * button sit below the fold with nothing to scroll. `100vh` is not the cap
+     * to use: on a phone it means the viewport with the browser bars collapsed,
+     * which is taller than what is actually on screen, so the foot of the panel
+     * stays unreachable by exactly the height of the bars. The percentage is of
+     * the fixed, inset-0 frame the app draws in, which is the real thing.
+     *
+     * `dvh` says the same as the percentage and is kept as the tighter of the
+     * two where a browser reports a frame taller than the visible viewport; the
+     * plain declaration above it is what an engine without `dvh` falls back to.
+     */
+    max-height: calc(100% - 1.5rem);
+    max-height: min(calc(100% - 1.5rem), calc(100dvh - 1.5rem));
     overflow-y: auto;
+    /* The map is behind it: scrolling to the end of the panel must not go on to
+       pan the terrain underneath. */
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 0.9rem 1rem 1rem;
     background: rgba(255, 255, 255, 0.96);
     border-radius: 12px;
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
     backdrop-filter: blur(6px);
   }
-  /*
-   * The folded panel: same corner, same plate, shrunk to the one number that is
-   * worth watching while the map is being tapped.
-   */
-  .restack {
-    position: absolute;
-    z-index: 5;
-    top: 0.75rem;
-    left: 0.75rem;
-    max-width: calc(100vw - 1.5rem);
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    padding: 0.55rem 0.9rem;
-    font: inherit;
-    text-align: left;
-    background: rgba(255, 255, 255, 0.96);
-    border: 0;
-    border-radius: 30px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
-    backdrop-filter: blur(6px);
-    cursor: pointer;
-  }
-  .restack:hover { filter: brightness(0.98); }
-  .mini-count { font-size: 1.1rem; font-weight: 700; }
-  .mini-label,
-  .mini-loading { color: var(--muted); font-size: 0.85rem; }
-  .mini-hint {
-    margin-left: 0.15rem;
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--accent);
-  }
-
   h2 { margin: 0; font-size: 1.05rem; }
   .head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
-  /* Wrapping as a pair, so the minimise glyph never lands alone under the heading. */
+  /* Wrapping as a pair, so the fold glyph never lands alone under the heading. */
   .head-actions { display: flex; align-items: baseline; gap: 0.9rem; flex: 0 0 auto; }
   /*
-   * A minus rather than the word, on the app's own icon-button idiom — the name
-   * lives in `title`/`aria-label`. No box around it: the row it shares is a text
-   * link, not the strip of buttons the quiz list draws.
+   * A minus or a plus rather than the word, on the app's own icon-button idiom —
+   * the name lives in `title`/`aria-label`. No box around it: the row it shares
+   * is a text link, not the strip of buttons the quiz list draws.
    *
    * The hit area is grown to a thumb and the margins pull the glyph back to
    * where it looks right, asymmetrically. It takes the panel's own right
    * padding, where there is nothing to hit by mistake, and stops short on the
    * left of "Change area" — a mis-tap there costs you the area you just framed.
    */
-  .minimise {
+  .fold {
     margin: -0.75rem -1rem -0.75rem 0;
     padding: 0.75rem 1rem 0.75rem 0.75rem;
     font: inherit;
@@ -633,7 +636,7 @@
     border: 0;
     cursor: pointer;
   }
-  .minimise:hover { color: #1d232b; }
+  .fold:hover { color: #1d232b; }
   .hint, .sub { color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
   .hint { margin: 0.5rem 0 0; }
   .sub { margin: 0.3rem 0 0; }

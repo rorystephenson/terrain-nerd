@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { makeQuizFile, mergeQuizFile, quizFilename, readQuizFile } from './storage.ts';
+import {
+  hasSeen,
+  makeQuizFile,
+  markSeen,
+  mergeQuizFile,
+  quizFilename,
+  readQuizFile,
+} from './storage.ts';
 import type { QuizSpec } from './types.ts';
 
 const quiz = (id: string, name = id, featureIds = ['peak/n1']): QuizSpec => ({
@@ -86,4 +93,35 @@ test('quiz filenames are safe and readable', () => {
   assert.equal(quizFilename('  ///  '), 'terrain-nerd-quiz.json', 'a nameless quiz still gets a file');
   assert.equal(quizFilename('../../etc/passwd'), 'terrain-nerd-etc-passwd.json', 'no path separators');
   assert.ok(quizFilename('x'.repeat(200)).length < 80, 'long names are trimmed');
+});
+
+/** Just enough of the Storage interface for the two calls under test. */
+function fakeStorage(fails = false) {
+  const cells = new Map<string, string>();
+  return {
+    getItem: (key: string) => {
+      if (fails) throw new Error('site data is blocked');
+      return cells.get(key) ?? null;
+    },
+    setItem: (key: string, value: string) => {
+      if (fails) throw new Error('site data is blocked');
+      cells.set(key, value);
+    },
+  } as unknown as Storage;
+}
+
+test('an explainer is shown until it has been seen, then never again', () => {
+  globalThis.localStorage = fakeStorage();
+  assert.equal(hasSeen('build:area'), false, 'first time through');
+  markSeen('build:area');
+  assert.equal(hasSeen('build:area'), true);
+  assert.equal(hasSeen('build:features'), false, 'seeing one says nothing about the other');
+});
+
+test('a browser that refuses site data just shows the explainer again', () => {
+  // Private browsing throws on the plain read; the builder should still work,
+  // it should not blow up.
+  globalThis.localStorage = fakeStorage(true);
+  assert.doesNotThrow(() => markSeen('build:area'));
+  assert.equal(hasSeen('build:area'), false);
 });
