@@ -94,9 +94,43 @@ function clusterByProximity(group: RawFeature[], gapKm: number): RawFeature[][] 
   return clusters;
 }
 
-function clusterToFeature(cluster: RawFeature[], kind: FeatureKind): QuizFeature {
+/**
+ * One merged feature from a cluster of same-named segments.
+ *
+ * **Sorted by osm id first, and everything downstream depends on that.** A
+ * cluster arrives in whatever order the extracts streamed, and five separate
+ * things were reading that order as if it meant something: the feature's id and
+ * its display name were taken from `cluster[0]`, the tag merge let the last
+ * member win, the parts were concatenated as they came, and `anchorOf` breaks a
+ * tie between equal-length parts by position.
+ *
+ * So the same OSM data could produce a different id, a different spelling of the
+ * name, and a different `wikidata` tag from one run to the next. That was
+ * invisible while quizzes lived in the browser that built them. It stops being
+ * invisible the moment a quiz is shared: a rebuilt pool silently drops features
+ * out of other people's quizzes, and the fallback that would repair them matches
+ * on exactly the name and wikidata tag that also moved.
+ *
+ * Note the *partition* was never the problem — `clusterByProximity` returns the
+ * connected components of a symmetric relation, which is order-independent
+ * already. It was only ever which member got to speak for the cluster.
+ *
+ * The lowest osm id speaks for it, and speaks for all of it: its id, its
+ * spelling of the name, and its tags. Other members only fill in tags it did
+ * not carry.
+ */
+function clusterToFeature(unordered: RawFeature[], kind: FeatureKind): QuizFeature {
+  const cluster = [...unordered].sort((a, b) => (a.osmId < b.osmId ? -1 : a.osmId > b.osmId ? 1 : 0));
   const parts = cluster.flatMap((member) => member.parts);
-  const tags = Object.assign({}, ...cluster.map((member) => member.tags)) as Record<string, string>;
+  // Reversed, because `Object.assign` lets the *last* source win: this way the
+  // representative's own tags take precedence and the rest only fill gaps it
+  // left. Assigning in cluster order instead would take the id and the name
+  // from the lowest member but `wikidata` and `ele` from the highest, which is
+  // one feature describing itself with two different segments' facts.
+  const tags = Object.assign(
+    {},
+    ...[...cluster].reverse().map((member) => member.tags),
+  ) as Record<string, string>;
   const lengthKm =
     kind.geometry === 'line' ? parts.reduce((sum, part) => sum + lineLengthKm(part), 0) : 0;
 

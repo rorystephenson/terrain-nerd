@@ -743,12 +743,12 @@ web/src/lib/
 ```
 
 The pure modules hold the logic worth being sure about, and are directly
-unit-tested — including five that live in the pipeline (`placeZoom.ts`,
-`stitch.ts`, `coverage.ts`, `png.ts` and `scores.ts`), tested from here because
-this is where the test runner is:
+unit-tested — including six that live in the pipeline (`placeZoom.ts`,
+`stitch.ts`, `coverage.ts`, `png.ts`, `scores.ts` and `normalize.ts`), tested
+from here because this is where the test runner is:
 
 ```bash
-npm test             # 202 tests
+npm test             # 208 tests
 npm run typecheck    # pipeline, web and the tools
 ```
 
