@@ -87,7 +87,7 @@
               {#if best[quiz.id] !== undefined}
                 <span class="best" class:perfect={best[quiz.id] === 100}>{best[quiz.id]}%</span>
               {/if}
-              <span class="count">{quiz.featureIds.length}</span>
+              <span class="count">{quiz.features.length}</span>
             </span>
           </button>
           <button class="icon" title="Save to file" aria-label="Save {quiz.name} to file" onclick={() => exportOne(quiz)}>↓</button>

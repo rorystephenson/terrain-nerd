@@ -6,8 +6,10 @@
   import Prompt from './lib/Prompt.svelte';
   import QuizList from './lib/QuizList.svelte';
   import Results from './lib/Results.svelte';
-  import { loadByIds, loadIndex, loadPlaces } from './lib/chunks.ts';
+  import { loadIndex, loadPlaces, loadRefs } from './lib/chunks.ts';
   import { placeFetchBox } from './lib/places.ts';
+  import { matchedFeatures } from './lib/resolve.ts';
+  import { healSpec } from './lib/heal.ts';
   import { useCoverage } from './lib/tiles.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
   import {
@@ -58,6 +60,8 @@
   let best = $state<Record<string, number>>({});
 
   let features = $state.raw<QuizFeature[]>([]);
+  /** Names of features this quiz refers to that the pool no longer holds. */
+  let gone = $state.raw<string[]>([]);
   let places = $state.raw<PlaceFeature[]>([]);
   let quiz = $state<QuizState | null>(null);
   let feedback = $state<Feedback | null>(null);
@@ -106,11 +110,18 @@
     const spec = current.spec;
     let cancelled = false;
 
-    loadByIds(pool, spec.bbox, spec.featureIds)
-      .then((loaded) => {
+    loadRefs(pool, spec.bbox, spec.features)
+      .then((resolved) => {
         if (cancelled) return;
-        features = loaded;
-        quiz = createQuiz(loaded);
+        const found = matchedFeatures(resolved);
+        features = found;
+        quiz = createQuiz(found);
+        gone = resolved.missing.map((ref) => ref.name ?? ref.id);
+        // The pool has just handed us names and anchors for everything this
+        // quiz refers to, so a quiz saved before it carried them can be filled
+        // in now. Playing an old quiz is what repairs it — see `migrateSpec`.
+        const healed = healSpec(spec, resolved);
+        if (healed !== spec) saveQuiz(healed);
       })
       .catch((error: unknown) => {
         if (!cancelled) loadError = error instanceof Error ? error.message : String(error);
@@ -389,6 +400,7 @@
           solved={tally.solved}
           total={tally.total}
           pct={tally.pct}
+          {gone}
           {collapsed}
           ontoggle={() => (collapsed = !collapsed)}
           onreplay={replay}

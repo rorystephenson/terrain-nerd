@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import MapView from './MapView.svelte';
-  import { loadArea, loadByIds, loadPlaces } from './chunks.ts';
+  import { loadArea, loadRefs, loadPlaces } from './chunks.ts';
+  import { matchedFeatures } from './resolve.ts';
   import {
     clearOverrides,
     clearSpacing,
@@ -202,7 +203,8 @@
   $effect(() => {
     if (!editing || area) return;
     let cancelled = false;
-    loadByIds(index, editing.bbox, editing.featureIds).then((chosen) => {
+    loadRefs(index, editing.bbox, editing.features).then((resolved) => {
+      const chosen = matchedFeatures(resolved);
       if (cancelled || chosen.length === 0) return;
       let box: [number, number, number, number] | null = null;
       for (const { properties } of chosen) {
@@ -342,11 +344,21 @@
       name: name.trim() || suggestedName(),
       source: 'built',
       createdAt: editing?.createdAt ?? new Date().toISOString(),
-      featureIds: picked.included.map((f) => f.id),
+      // Names and anchors travel with the ids, so a quiz can find its features
+      // again after a pool rebuild moves one. See `resolve.ts`.
+      features: picked.included.map((f) => ({
+        id: f.id,
+        kind: f.properties.kind,
+        name: f.properties.name,
+        at: f.properties.anchor,
+        ...(f.properties.wikidata ? { wikidata: f.properties.wikidata } : {}),
+      })),
       // From the features, not the builder viewport: however the map was left,
       // the quiz frames itself sensibly.
       bbox: padBox(picked.bbox),
       builder,
+      // Which build of the pool these ids were true of.
+      poolAt: index.generatedAt,
     });
   }
 

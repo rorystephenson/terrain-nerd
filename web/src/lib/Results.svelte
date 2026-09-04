@@ -12,6 +12,14 @@
     pct: number;
     onreplay: () => void;
     onmenu: () => void;
+    /**
+     * Features this quiz asks for that the map data no longer holds.
+     *
+     * Named rather than counted, because "which two" is the question anyone
+     * would ask next, and because a quiz that has quietly lost a feature is
+     * scoring you out of a different total than it used to.
+     */
+    gone: string[];
     /** Folded away so the finished map can be studied. */
     collapsed: boolean;
     ontoggle: () => void;
@@ -28,6 +36,7 @@
     pct,
     onreplay,
     onmenu,
+    gone,
     collapsed,
     ontoggle,
     nameOf,
@@ -68,6 +77,14 @@
         {#if beaten}<span class="pb">New best — was {previousBest}%</span>
         {:else if previousBest !== undefined}<span class="pb dim">Best {previousBest}%</span>{/if}
       </p>
+
+      {#if gone.length > 0}
+        <p class="gone">
+          {gone.length === 1 ? '1 feature is' : `${gone.length} features are`} no longer in the
+          map data, so {gone.length === 1 ? 'it was' : 'they were'} not asked:
+          {gone.join(', ')}.
+        </p>
+      {/if}
 
       <ul class="review">
         {#each answers as answer (answer.targetId)}
@@ -187,6 +204,16 @@
   }
   .tally { margin: 0.35rem 0 0; color: var(--muted); }
   .verdict { margin: 0.15rem 0 1rem; color: var(--muted); }
+
+  .gone {
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--muted);
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 7px;
+  }
 
   .review {
     list-style: none;

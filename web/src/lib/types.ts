@@ -123,6 +123,34 @@ export type BuilderState = {
   spacing?: Record<string, number>;
 };
 
+/**
+ * A feature as a quiz remembers it.
+ *
+ * An id alone was enough while a quiz never left the browser that built it: the
+ * pool it pointed into was the pool that made it. Shared quizzes break that.
+ * The pool is rebuilt from OSM, and an id can move — a way gets deleted, a
+ * valley's segments cluster differently — at which point a quiz holding bare
+ * ids quietly asks a shorter round and nobody can tell that it did.
+ *
+ * So a quiz carries enough to find a feature again without its id: what it is
+ * called, what kind it is, roughly where it stands, and its wikidata entity when
+ * OSM has one. See `resolve.ts` for what does the finding.
+ */
+export type FeatureRef = {
+  id: string;
+  kind: KindId;
+  /**
+   * Absent on quizzes saved before this existed. Such a quiz can still be
+   * played by id; it simply has nothing to fall back on. The first round filled
+   * in from the pool repairs that, so the gap closes on its own.
+   */
+  name?: string;
+  /** The feature's own anchor, so same-named features can be told apart. */
+  at?: [number, number];
+  /** The most durable key there is, when OSM carries one. */
+  wikidata?: string;
+};
+
 /** One replayable quiz: a frozen set of features. */
 export type QuizSpec = {
   id: string;
@@ -130,11 +158,24 @@ export type QuizSpec = {
   source: 'built' | 'starter';
   createdAt: string;
   /** Resolved at save time, so replaying always asks the same set. */
-  featureIds: string[];
+  features: FeatureRef[];
+  /**
+   * What `features` used to be, kept only so a quiz saved before it existed
+   * still loads. Read on the way in and never written; `migrateSpec` in
+   * `storage.ts` is the one place that looks at it.
+   */
+  featureIds?: string[];
   /** Derived from the chosen features, not from the builder viewport. */
   bbox: [number, number, number, number];
   /** Kept so editing can restore the sliders; never used to play. */
   builder?: BuilderState;
+  /**
+   * `PoolIndex.generatedAt` when this quiz was saved.
+   *
+   * Says which build of the pool the ids were true of, so a quiz that resolves
+   * badly can at least be told apart from one built against today's data.
+   */
+  poolAt?: string;
 };
 
 /** Where the map is currently looking, relative to the area being quizzed. */

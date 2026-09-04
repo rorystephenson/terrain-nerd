@@ -8,7 +8,9 @@
  */
 import { boxesOverlap, cellsCovering, geometryIntersectsBox, pointInBox } from './grid.ts';
 import { visibleAtZoom } from './places.ts';
+import { resolveFeatures, type Resolution } from './resolve.ts';
 import type {
+  FeatureRef,
   KindId,
   PlaceFeature,
   PoolIndex,
@@ -115,19 +117,25 @@ export async function loadArea(
 /**
  * The features a saved quiz refers to.
  *
- * Ids carry no location, so the quiz's own bbox is what says where to look —
- * and because it covers every chosen feature, the cells it touches must hold
- * them all.
+ * Refs carry no location precise enough to fetch by, so the quiz's own bbox is
+ * what says where to look — and because it covers every chosen feature, the
+ * cells it touches must hold them all.
+ *
+ * Returns a `Resolution` rather than a plain list because a reference can fail:
+ * ids move when the pool is rebuilt, and features are deleted from OSM. This
+ * used to be `ids.flatMap((id) => byId.get(id) ?? [])`, which turned a broken
+ * reference into a shorter quiz with nothing said about it — a score that still
+ * read as a percentage and quietly meant something else. `resolve.ts` finds what
+ * it can and names what it cannot.
  */
-export async function loadByIds(
+export async function loadRefs(
   index: PoolIndex,
   bbox: [number, number, number, number],
-  ids: readonly string[],
-): Promise<QuizFeature[]> {
-  const kinds = [...new Set(ids.map((id) => id.split('/')[0] as KindId))];
+  refs: readonly FeatureRef[],
+): Promise<Resolution> {
+  const kinds = [...new Set(refs.map((ref) => ref.kind))];
   const found = await loadArea(index, bbox, kinds);
-  const byId = new Map(found.map((feature) => [feature.id, feature]));
-  return ids.flatMap((id) => byId.get(id) ?? []);
+  return resolveFeatures(found, refs);
 }
 
 /**

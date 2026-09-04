@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  FILE_VERSION,
   hasSeen,
   makeQuizFile,
   markSeen,
@@ -11,12 +12,17 @@ import {
 } from './storage.ts';
 import type { QuizSpec } from './types.ts';
 
-const quiz = (id: string, name = id, featureIds = ['peak/n1']): QuizSpec => ({
+const quiz = (id: string, name = id, ids = ['peak/n1']): QuizSpec => ({
   id,
   name,
   source: 'built',
   createdAt: '2026-08-29T00:00:00.000Z',
-  featureIds,
+  features: ids.map((featureId) => ({
+    id: featureId,
+    kind: featureId.split('/')[0] as QuizSpec['features'][number]['kind'],
+    name: 'Cima Tosa',
+    at: [10.87, 46.16] as [number, number],
+  })),
   bbox: [10, 46, 11, 47],
 });
 
@@ -124,4 +130,37 @@ test('a browser that refuses site data just shows the explainer again', () => {
   globalThis.localStorage = fakeStorage(true);
   assert.doesNotThrow(() => markSeen('build:area'));
   assert.equal(hasSeen('build:area'), false);
+});
+
+test('a version 1 file still imports, and its ids become references', () => {
+  // The shape written before features carried their own names. Someone has one
+  // of these on disk; refusing it would lose them the quiz.
+  const v1 = JSON.stringify({
+    app: 'terrain-nerd',
+    version: 1,
+    exportedAt: '2026-01-01T00:00:00.000Z',
+    quizzes: [
+      {
+        id: 'q1',
+        name: 'Brenta',
+        source: 'built',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        featureIds: ['peak/n1', 'valley/w2'],
+        bbox: [10, 46, 11, 47],
+      },
+    ],
+  });
+
+  const file = readQuizFile(v1);
+  assert.equal(file.version, FILE_VERSION);
+  assert.deepEqual(file.quizzes[0].features, [
+    { id: 'peak/n1', kind: 'peak' },
+    { id: 'valley/w2', kind: 'valley' },
+  ]);
+  assert.equal(file.quizzes[0].featureIds, undefined, 'the legacy field is not carried forward');
+});
+
+test('a file from a future version is refused rather than half-read', () => {
+  const v9 = JSON.stringify({ app: 'terrain-nerd', version: 9, quizzes: [] });
+  assert.throws(() => readQuizFile(v9), /version 9 is not supported/);
 });

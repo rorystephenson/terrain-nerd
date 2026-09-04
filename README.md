@@ -733,6 +733,8 @@ web/src/lib/
   selection.ts     the crop frame, in pixels            (pure)
   places.ts        reading a name's zoom range          (pure)
   quiz.ts          quiz state machine                   (pure)
+  resolve.ts       finding features whose ids moved      (pure)
+  heal.ts          what an old quiz learns by playing    (pure)
   labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid        (pure)
   thin.ts          one voice per cluster                (pure)
@@ -748,7 +750,7 @@ unit-tested — including six that live in the pipeline (`placeZoom.ts`,
 from here because this is where the test runner is:
 
 ```bash
-npm test             # 208 tests
+npm test             # 226 tests
 npm run typecheck    # pipeline, web and the tools
 ```
 
