@@ -848,6 +848,15 @@ npm run test:share   # publishing and opening a link  (likewise)
   quizzes looks perfectly healthy locally. The policy is an allowlist kept in
   the Cloudflare dashboard; `npm run r2:cors -- https://the-new-domain` says
   whether it is in it.
+
+  Adding the origin is not always enough, which is why that check asks twice.
+  R2 sends `Vary: Origin` only on a response where CORS applies, so a request
+  made *without* an Origin header — a `curl -I`, a tile URL opened in a browser
+  tab — is cached at the edge under a key with no `Vary` and then handed to
+  everybody, missing the headers, until the TTL expires. That is a day for
+  tiles. The symptom is identical to a missing policy and the fix is not:
+  `r2:cors` reports `OLD … allowed at the bucket, stale at the edge`, and the
+  answer is to purge the cache rather than to touch the allowlist.
 - **A style change costs a re-render**, not a page refresh:
   `npm run render:tiles -- --force`, six minutes with a warm DEM cache, then an
   upload of whatever actually changed. Coverage changes are incremental;

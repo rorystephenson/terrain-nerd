@@ -46,28 +46,73 @@ const targets = [
 const given = process.argv.slice(2).filter((arg) => arg.startsWith('http'));
 const origins = given.length > 0 ? given : ['http://localhost:5173', 'https://balanci.ng'];
 
-let bad = 0;
+/**
+ * Asks twice, and the difference is the whole point.
+ *
+ * The plain URL is what a visitor gets. The cache-busted one bypasses
+ * Cloudflare's edge and is what the bucket policy actually says. When they
+ * disagree, the policy is right and the edge is holding a copy cached before it
+ * was — and that happens more easily than it sounds: R2 only sends
+ * `Vary: Origin` on a response where CORS applies, so a request *without* an
+ * Origin header — a `curl -I`, a tile URL opened in a browser tab — is cached
+ * under a key with no Vary and then served to everybody, headers and all
+ * missing, until the TTL runs out. A day, for tiles.
+ *
+ * Telling those two apart is the difference between "add the origin" and
+ * "purge the cache", which are an hour apart if you guess wrong.
+ */
+const ask = async (url, origin) => {
+  const response = await fetch(url, { headers: { Origin: origin } }).catch(() => null);
+  return {
+    ok: Boolean(response?.ok) && [origin, '*'].includes(response?.headers.get('access-control-allow-origin')),
+    status: response ? `HTTP ${response.status}` : 'unreachable',
+    cache: response?.headers.get('cf-cache-status') ?? '',
+  };
+};
+
+let refused = 0;
+let stale = 0;
 for (const origin of origins) {
   for (const [what, url] of targets) {
-    const response = await fetch(url, { headers: { Origin: origin } }).catch(() => null);
-    const allow = response?.headers.get('access-control-allow-origin');
-    const ok = response?.ok && (allow === origin || allow === '*');
-    if (!ok) bad++;
+    const live = await ask(url, origin);
+    // Only worth asking when the plain one failed.
+    const direct = live.ok ? live : await ask(`${url}?cors-probe=${Date.now()}`, origin);
+
+    let verdict;
+    if (live.ok) verdict = 'ok  ';
+    else if (direct.ok) {
+      verdict = 'OLD ';
+      stale++;
+    } else {
+      verdict = 'NO  ';
+      refused++;
+    }
+
     console.log(
-      `${ok ? 'ok  ' : 'NO  '} ${origin.padEnd(28)} ${what.padEnd(8)} ` +
-        `${response ? `HTTP ${response.status}` : 'unreachable'}` +
-        `${allow ? ` allow-origin: ${allow}` : ' no allow-origin header'}`,
+      `${verdict} ${origin.padEnd(28)} ${what.padEnd(8)} ${live.status}` +
+        `${live.cache ? ` ${live.cache.toLowerCase()}` : ''}` +
+        `${live.ok ? '' : direct.ok ? ' — allowed at the bucket, stale at the edge' : ' — no allow-origin header'}`,
     );
   }
 }
 
-if (bad > 0) {
+if (stale > 0) {
   console.error(
-    `\n${bad} of ${origins.length * targets.length} refused.` +
-      '\nAdd the origin to the bucket policy: Cloudflare dashboard > R2 >' +
-      '\n<bucket> > Settings > CORS Policy. Until it is there, a build served' +
-      '\nfrom that origin gets a blank basemap and empty quizzes, and nothing' +
-      '\nabout it shows on a dev server.',
+    `\n${stale} served from a copy cached before the policy allowed this origin.` +
+      '\nThe bucket is right; the edge is not. Purge it — Cloudflare dashboard >' +
+      '\nthe bucket\'s domain > Caching > Configuration > Purge Everything — and' +
+      '\nrun this again. Until then a browser gets exactly what is shown above.',
   );
-  process.exitCode = 1;
 }
+
+if (refused > 0) {
+  console.error(
+    `\n${refused} refused by the bucket itself.` +
+      '\nAdd the origin to the policy: Cloudflare dashboard > R2 > <bucket> >' +
+      '\nSettings > CORS Policy. Until it is there, a build served from that' +
+      '\norigin gets a blank basemap and empty quizzes, and nothing about it' +
+      '\nshows on a dev server.',
+  );
+}
+
+if (refused > 0 || stale > 0) process.exitCode = 1;
