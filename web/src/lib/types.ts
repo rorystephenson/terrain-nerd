@@ -170,6 +170,16 @@ export type QuizSpec = {
   /** Kept so editing can restore the sliders; never used to play. */
   builder?: BuilderState;
   /**
+   * When the quiz was last *edited*, as opposed to created.
+   *
+   * Only set by the builder, and deliberately not by `healSpec`: a repair that
+   * fills in names the pool already knows is not an edit anyone made, and
+   * letting it bump the clock would make a quiz look newer on whichever machine
+   * happened to play it last. Absent on quizzes saved before this existed, so
+   * readers fall back to `createdAt`.
+   */
+  updatedAt?: string;
+  /**
    * `PoolIndex.generatedAt` when this quiz was saved.
    *
    * Says which build of the pool the ids were true of, so a quiz that resolves

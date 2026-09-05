@@ -344,6 +344,7 @@
       name: name.trim() || suggestedName(),
       source: 'built',
       createdAt: editing?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       // Names and anchors travel with the ids, so a quiz can find its features
       // again after a pool rebuild moves one. See `resolve.ts`.
       features: picked.included.map((f) => ({

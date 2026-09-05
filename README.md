@@ -726,6 +726,9 @@ pipeline/          run on demand, never at build time
 tools/             dev tools, on their own Vite roots
   coverage/        pick the ground, and the extracts that cover it cheapest
   render/          draw the tile pyramid, and upload it to R2
+  rules/           what the security rules actually allow
+firestore.rules    what the client may do, enforced by the database
+firestore.indexes.json
 web/src/lib/
   terrain.ts       elevation palette and DEM source     (pure)
   mapStyle.ts      the rendered style, and the app's    (pure)
@@ -735,6 +738,8 @@ web/src/lib/
   quiz.ts          quiz state machine                   (pure)
   resolve.ts       finding features whose ids moved      (pure)
   heal.ts          what an old quiz learns by playing    (pure)
+  codec.ts         quizzes to and from Firestore         (pure)
+  library.ts       reconciling this browser with the account (pure)
   labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid        (pure)
   thin.ts          one voice per cluster                (pure)
@@ -750,8 +755,9 @@ unit-tested — including six that live in the pipeline (`placeZoom.ts`,
 from here because this is where the test runner is:
 
 ```bash
-npm test             # 226 tests
+npm test             # 247 tests
 npm run typecheck    # pipeline, web and the tools
+npm run test:rules   # 22 rules tests, against the Firestore emulator (needs Java)
 ```
 
 ## Known gaps

@@ -1,0 +1,30 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "published",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hidden", "order": "ASCENDING" },
+        { "fieldPath": "players", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "published",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hidden", "order": "ASCENDING" },
+        { "fieldPath": "publishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "published",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cells", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "hidden", "order": "ASCENDING" },
+        { "fieldPath": "players", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

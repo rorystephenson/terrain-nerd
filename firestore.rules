@@ -1,0 +1,122 @@
+rules_version = '2';
+
+/*
+ * What the client is allowed to do, enforced by the database.
+ *
+ * The guiding rule here is that nothing important is true only because the
+ * client agreed to it. A best score cannot go down, a published quiz cannot
+ * change without its version stepping, and the popularity counter cannot move
+ * except alongside a marker that the same person can create exactly once and
+ * can never delete. Each of those is a promise the app makes; each is a promise
+ * the app is not trusted to keep on its own.
+ *
+ * What rules cannot do is loop, so nothing here can check an *element* of
+ * `features`. Shape and size only — `web/src/lib/codec.ts` is what stands
+ * between whatever gets through and a round.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // Anonymous accounts are lost with site data. Playing and building are fine
+    // on one; publishing is not, because a published quiz with an author who
+    // cannot be reached is worse than no publish button.
+    function isNamed() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function touched() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function validQuiz(d) {
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 80
+          && d.bbox is list && d.bbox.size() == 4
+          && d.features is list && d.features.size() > 0 && d.features.size() <= 400;
+    }
+
+    function validPct(v) { return v is int && v >= 0 && v <= 100; }
+
+    match /users/{uid} {
+      // Public, because a published quiz shows who made it and should not need
+      // a second read to say so. Nothing else lives here.
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['displayName', 'photoURL', 'createdAt', 'updatedAt'])
+        && (!('displayName' in request.resource.data)
+            || (request.resource.data.displayName is string
+                && request.resource.data.displayName.size() <= 40));
+      allow delete: if false;
+
+      match /quizzes/{quizId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validQuiz(request.resource.data);
+      }
+
+      match /progress/{quizId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validPct(request.resource.data.best);
+        // Monotone, and enforced here rather than agreed between clients: a
+        // device that has been offline for a week must not be able to push a
+        // stale score over a better one it never saw.
+        allow update: if isOwner(uid)
+          && validPct(request.resource.data.best)
+          && request.resource.data.best >= resource.data.best;
+      }
+    }
+
+    match /published/{quizId} {
+      allow get, list: if true;
+
+      allow create: if isNamed()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.version == 1
+        && request.resource.data.players == 0
+        && request.resource.data.hidden == false
+        && validQuiz(request.resource.data);
+
+      allow update: if
+        // The author republishing. An explicit act, and it steps the version:
+        // that is what makes "frozen" mean something, and what keeps a score
+        // attached to the question set it was earned against.
+        (isNamed()
+          && resource.data.ownerId == request.auth.uid
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.version == resource.data.version + 1
+          && request.resource.data.players == resource.data.players
+          && request.resource.data.hidden == resource.data.hidden
+          && validQuiz(request.resource.data))
+        ||
+        // A player finishing a round for the first time. Only the counter
+        // moves, only by one, and only in the same commit that creates their
+        // marker — which they can create once and never delete. So `players`
+        // is provably the number of distinct people who have finished it.
+        (signedIn()
+          && touched().hasOnly(['players'])
+          && request.resource.data.players == resource.data.players + 1
+          && !exists(/databases/$(database)/documents/published/$(quizId)/players/$(request.auth.uid))
+          && existsAfter(/databases/$(database)/documents/published/$(quizId)/players/$(request.auth.uid)));
+
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      match /players/{playerId} {
+        allow get: if isOwner(playerId);
+        allow list: if false;
+        allow create: if isOwner(playerId);
+        // Never: a marker that could be removed is a counter that could be
+        // spent twice.
+        allow update, delete: if false;
+      }
+
+      match /versions/{version} {
+        allow get, list: if true;
+        allow create: if signedIn()
+          && get(/databases/$(database)/documents/published/$(quizId)).data.ownerId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+  }
+}
