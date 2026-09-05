@@ -566,6 +566,18 @@ async function main() {
 
   await writeJson('index.json', {
     generatedAt: new Date().toISOString().slice(0, 10),
+    /*
+     * Changes on every build, and exists only to be put in a query string.
+     *
+     * Cells are served with a day's cache under a path they keep, so a rebuilt
+     * pool used to take up to 24 hours to reach anybody who had already loaded
+     * the app — and in that window their builder would offer features by ids
+     * the pool no longer had, and save quizzes referring to them. The index
+     * itself is only cached for five minutes, so the client learns this
+     * quickly and hangs it on every cell request. Distinct from `generatedAt`,
+     * which is a date shown to people and is the same for two builds in a day.
+     */
+    buildId: Date.now().toString(36),
     attribution: '© OpenStreetMap contributors (ODbL)',
     area: COVERAGE,
     chunkZoom: CHUNK_ZOOM,

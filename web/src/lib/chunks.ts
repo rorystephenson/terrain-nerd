@@ -45,6 +45,8 @@ export async function loadIndex(): Promise<PoolIndex> {
     );
   }
   const index = (await response.json()) as PoolIndex;
+  // Before any cell is asked for: it decides which build they come from.
+  buildId = index.buildId ?? '';
   if (!index.places.thinned) {
     console.warn(
       'Place names in this pool carry no zoom range, so they are drawn by rank alone ' +
@@ -54,6 +56,17 @@ export async function loadIndex(): Promise<PoolIndex> {
   return index;
 }
 
+/**
+ * The build the cells are being read for.
+ *
+ * Set from the index, which is cached for five minutes where the cells are
+ * cached for a day. Without it a rebuilt pool would go on being invisible to
+ * anyone already holding the old one — and worse than invisible: their builder
+ * would offer features under ids the pool no longer has, and save a quiz that
+ * refers to them. Which is exactly what happened.
+ */
+let buildId = '';
+
 async function loadCell(dir: string, cell: string): Promise<unknown[]> {
   const key = `${dir}/${cell}`;
   const held = cells.get(key);
@@ -62,7 +75,7 @@ async function loadCell(dir: string, cell: string): Promise<unknown[]> {
   const already = pending.get(key);
   if (already) return already;
 
-  const request = fetch(`${BASE}/${dir}/${cell}.geojson`)
+  const request = fetch(`${BASE}/${dir}/${cell}.geojson${buildId ? `?v=${buildId}` : ''}`)
     .then(async (response) => {
       if (!response.ok) return [];
       const file = (await response.json()) as { features: unknown[] };

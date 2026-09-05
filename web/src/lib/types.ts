@@ -80,6 +80,14 @@ export type KindInfo = {
 /** What the app loads first: the shape of the pool and where its chunks are. */
 export type PoolIndex = {
   generatedAt: string;
+  /**
+   * Which build of the pool this is, for cache-busting the cells.
+   *
+   * They are cached for a day under paths they keep, so without this a rebuild
+   * reaches nobody who already has them until the day is out — see `loadCell`.
+   * Absent on a pool built before this existed.
+   */
+  buildId?: string;
   attribution: string;
   area: [number, number, number, number];
   /** Zoom of the XYZ tiles the pool is chunked into. */

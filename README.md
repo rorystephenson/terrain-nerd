@@ -445,6 +445,14 @@ each object's MD5 as its ETag, so anything whose bytes match is skipped. Presenc
 alone would not do, because a redrawn tile and a rebuilt cell both keep the path
 they had, and skipping what was already there would leave the old bytes live.
 
+**Cells carry the build they came from.** They are served with a day's cache
+under paths they keep, so a rebuilt pool used to reach nobody who already had
+the old one until the day was out — and worse than not reaching them: their
+builder went on offering features under ids the pool no longer held, and saved
+quizzes referring to them. `index.json` is cached for five minutes and carries a
+`buildId`, which the client hangs on every cell request, so a rebuild is visible
+within minutes and a stale cell cannot be mistaken for a current one.
+
 `upload:data` has two jobs the tile upload does not. **The index goes last** —
 it is the manifest, the app never asks for a cell it does not list, and
 `loadCell` turns a failed fetch into empty ground rather than an error. Sent
