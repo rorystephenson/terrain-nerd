@@ -1,5 +1,10 @@
 /**
- * Checks that a browser on a given origin may read the bucket.
+ * Checks that an origin is allowed to be an origin.
+ *
+ * Two registrations stand between a deployed build and a working one, both of
+ * them per-domain, both invisible in development, and both failing in ways that
+ * look nothing like "you forgot to add a domain": the bucket's CORS allowlist,
+ * and Firebase's list of domains permitted to run a sign-in popup.
  *
  * Both the basemap and the pool are read with `fetch` from a page that is not
  * on the bucket's origin — `tiles.ts` wants an `ArrayBuffer` to hand MapLibre,
@@ -20,13 +25,33 @@
  * all: given an origin, does the bucket let it read? Adding a new deploy domain
  * means adding it in the dashboard and confirming it here.
  *
- *   npm run r2:cors                          # the origins we already expect
- *   npm run r2:cors -- https://example.com   # one you are about to deploy to
+ *   npm run check:domain                          # the origins we already expect
+ *   npm run check:domain -- https://example.com   # one you are about to deploy to
  */
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
-import { REPO } from './r2.mjs';
+const REPO = resolve(import.meta.dirname, '..');
+
+/**
+ * Firebase half.
+ *
+ * `signInWithPopup` and `linkWithPopup` refuse to run on a domain that is not in
+ * the project's authorized list, so signing in fails on a fresh deploy with a
+ * console message and nothing else — the button simply does nothing. The list is
+ * readable with the web API key, which is public by design, so this needs no
+ * credentials. Adding to it does need the console.
+ */
+async function firebaseDomains() {
+  const config = await readFile(join(REPO, 'web/src/lib/firebase.ts'), 'utf8');
+  const key = /apiKey: '([^']+)'/.exec(config)?.[1];
+  const project = /projectId: '([^']+)'/.exec(config)?.[1];
+  if (!key) return null;
+  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/projects?key=${key}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  return response ? { project, domains: response.authorizedDomains ?? [] } : null;
+}
 
 const env = Object.fromEntries(
   (await readFile(join(REPO, 'web/.env.production'), 'utf8'))
@@ -115,4 +140,27 @@ if (refused > 0) {
   );
 }
 
-if (refused > 0 || stale > 0) process.exitCode = 1;
+// Firebase's authorized domains, for the same origins.
+const firebase = await firebaseDomains();
+let unauthorized = 0;
+if (firebase) {
+  for (const origin of origins) {
+    const host = new URL(origin).hostname;
+    const ok = firebase.domains.includes(host);
+    if (!ok) unauthorized++;
+    console.log(`${ok ? 'ok  ' : 'NO  '} ${origin.padEnd(28)} sign-in  ${ok ? 'authorized' : 'not an authorized domain'}`);
+  }
+  if (unauthorized > 0) {
+    console.error(
+      `\n${unauthorized} cannot run a sign-in popup.` +
+        '\nFirebase console > Authentication > Settings > Authorized domains >' +
+        `\nAdd domain. Currently: ${firebase.domains.join(', ')}.` +
+        '\nWithout it the sign-in button does nothing at all — `signInWithPopup`' +
+        '\nrefuses before it opens, and the only sign of it is a console line.',
+    );
+  }
+} else {
+  console.log('??   could not read the Firebase authorized domains — check by hand');
+}
+
+if (refused > 0 || stale > 0 || unauthorized > 0) process.exitCode = 1;

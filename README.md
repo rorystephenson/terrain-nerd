@@ -840,23 +840,21 @@ npm run test:share   # publishing and opening a link  (likewise)
   is a storage number, not a per-visit one: cells load individually, and one
   Val Rendena cell across all four kinds is 428 KB. It is in R2 beside the
   basemap's 130 MB, where egress is free, so the site itself is 2 MB.
-- **A new deploy domain needs adding to the bucket's CORS allowlist**, and
-  forgetting it fails in a way development cannot show. Both the basemap and the
-  pool are read with `fetch` from a page that is not on the bucket's origin, so
-  both depend on that origin being named in the policy — but a dev server serves
-  both same-origin off disk, so a build that will show a blank map and empty
-  quizzes looks perfectly healthy locally. The policy is an allowlist kept in
-  the Cloudflare dashboard; `npm run r2:cors -- https://the-new-domain` says
-  whether it is in it.
+- **A new deploy domain has to be registered in three places**, and none of them
+  can be seen from a dev server, which serves the map data same-origin off disk
+  and is `localhost`, allowed everywhere by default. The bucket's CORS allowlist,
+  or the basemap and every quiz come up empty. The edge cache, which is not a
+  setting but bites like one — R2 sends `Vary: Origin` only on responses where
+  CORS applies, so anything fetched *without* an Origin header is cached with no
+  `Vary` and then served to everyone without the headers until the TTL expires,
+  a day for tiles. And Firebase's authorized domains, or the sign-in button does
+  nothing at all: `signInWithPopup` refuses before it opens and says so only in
+  the console.
 
-  Adding the origin is not always enough, which is why that check asks twice.
-  R2 sends `Vary: Origin` only on a response where CORS applies, so a request
-  made *without* an Origin header — a `curl -I`, a tile URL opened in a browser
-  tab — is cached at the edge under a key with no `Vary` and then handed to
-  everybody, missing the headers, until the TTL expires. That is a day for
-  tiles. The symptom is identical to a missing policy and the fix is not:
-  `r2:cors` reports `OLD … allowed at the bucket, stale at the edge`, and the
-  answer is to purge the cache rather than to touch the allowlist.
+  Three unrelated symptoms — empty map, empty map, dead button — and one cause.
+  `npm run check:domain -- https://the-new-domain` reports all three and, for
+  the middle one, says `OLD … allowed at the bucket, stale at the edge` so a
+  purge is not mistaken for an allowlist edit.
 - **A style change costs a re-render**, not a page refresh:
   `npm run render:tiles -- --force`, six minutes with a warm DEM cache, then an
   upload of whatever actually changed. Coverage changes are incremental;
