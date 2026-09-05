@@ -1,11 +1,16 @@
 /**
  * Finding the features a saved quiz refers to, when their ids have moved.
  *
- * A quiz is a list of references into a pool that is rebuilt from OSM. Most of
- * the time an id still names the same feature and there is nothing to do. But
- * ways get deleted, retagged and re-drawn, and a valley's segments can cluster
- * differently between builds — so some fraction of a shared quiz's ids will,
- * eventually, point at nothing.
+ * A quiz is a list of references into a pool that is rebuilt from OSM. Almost
+ * always an id still names the same feature: a peak or a pass *is* one OSM
+ * node and keeps its id for as long as the node exists, and most valleys are a
+ * single way. The exception is a valley merged from several ways, which takes
+ * the lowest of their ids — about one valley in eight — and whose id therefore
+ * moves if that particular way is deleted or a lower-numbered one joins it.
+ *
+ * Rare, then, and bounded. But a *published* quiz is a permanent thing other
+ * people are holding, and it cannot be repaired after the fact, so it carries
+ * enough to find its features again without their ids.
  *
  * The old behaviour was to drop those silently: `loadByIds` did
  * `byId.get(id) ?? []` and the round simply had fewer questions in it. That is
@@ -114,9 +119,12 @@ export function resolveFeatures(
       continue;
     }
 
-    const named = ref.name
-      ? pick(byName.get(`${ref.kind}/${normalizeName(ref.name)}`), ref, claimed, RESCUE_KM[ref.kind])
-      : null;
+    const named = pick(
+      byName.get(`${ref.kind}/${normalizeName(ref.name)}`),
+      ref,
+      claimed,
+      RESCUE_KM[ref.kind],
+    );
     if (named) {
       claimed.add(named.id);
       matched.push({ ref, feature: named, by: 'name' });
@@ -135,14 +143,7 @@ function push(map: Map<string, QuizFeature[]>, key: string, feature: QuizFeature
   else map.set(key, [feature]);
 }
 
-/**
- * The nearest unclaimed candidate within reach, or nothing.
- *
- * A ref with no `at` — one saved before quizzes carried anchors — cannot judge
- * distance, so it takes the only candidate when there is exactly one and
- * declines to guess when there are several. Picking arbitrarily between two
- * Valsordas would be worse than admitting the quiz cannot say which it meant.
- */
+/** The nearest unclaimed candidate within reach, or nothing. */
 function pick(
   candidates: QuizFeature[] | undefined,
   ref: FeatureRef,
@@ -151,7 +152,6 @@ function pick(
 ): QuizFeature | null {
   const open = (candidates ?? []).filter((feature) => !claimed.has(feature.id));
   if (open.length === 0) return null;
-  if (!ref.at) return open.length === 1 ? open[0] : null;
 
   let best: QuizFeature | null = null;
   let bestKm = Infinity;

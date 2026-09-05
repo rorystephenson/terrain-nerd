@@ -26,15 +26,17 @@ const feature = (
   };
 };
 
-const ref = (id: string, rest: Partial<FeatureRef> = {}): FeatureRef => ({
+const ref = (id: string, name: string, at: [number, number], wikidata?: string): FeatureRef => ({
   id,
   kind: id.split('/')[0] as KindId,
-  ...rest,
+  name,
+  at,
+  ...(wikidata ? { wikidata } : {}),
 });
 
 test('ids that still resolve are used as they are', () => {
   const pool = [feature('peak/n1', 'Cima Tosa', [10.87, 46.16])];
-  const out = resolveFeatures(pool, [ref('peak/n1', { name: 'Cima Tosa', at: [10.87, 46.16] })]);
+  const out = resolveFeatures(pool, [ref('peak/n1', 'Cima Tosa', [10.87, 46.16])]);
 
   assert.deepEqual(matchedFeatures(out).map((f) => f.id), ['peak/n1']);
   assert.deepEqual(repairs(out), []);
@@ -45,7 +47,7 @@ test('a moved id is rescued by its wikidata entity, however far it moved', () =>
   // The way was redrawn and renamed; the entity is the same mountain.
   const pool = [feature('peak/n999', 'Cima Tosa (Brenta)', [11.4, 46.4], { wikidata: 'Q7' })];
   const out = resolveFeatures(pool, [
-    ref('peak/n1', { name: 'Cima Tosa', at: [10.87, 46.16], wikidata: 'Q7' }),
+    ref('peak/n1', 'Cima Tosa', [10.87, 46.16], 'Q7'),
   ]);
 
   assert.deepEqual(matchedFeatures(out).map((f) => f.id), ['peak/n999']);
@@ -55,7 +57,7 @@ test('a moved id is rescued by its wikidata entity, however far it moved', () =>
 test('a moved id is rescued by name when it is still in the right place', () => {
   const pool = [feature('valley/w2', 'Val Rendena', [10.75, 46.1])];
   const out = resolveFeatures(pool, [
-    ref('valley/w1', { name: 'val  rendena', at: [10.76, 46.11] }),
+    ref('valley/w1', 'val  rendena', [10.76, 46.11]),
   ]);
 
   assert.deepEqual(matchedFeatures(out).map((f) => f.id), ['valley/w2']);
@@ -65,7 +67,7 @@ test('a moved id is rescued by name when it is still in the right place', () => 
 test('the same name far away is not the same feature', () => {
   // Two Valsordas, 70 km apart. A name match alone would take the wrong one.
   const pool = [feature('valley/w2', 'Valsorda', [11.6, 46.1])];
-  const out = resolveFeatures(pool, [ref('valley/w1', { name: 'Valsorda', at: [10.7, 46.1] })]);
+  const out = resolveFeatures(pool, [ref('valley/w1', 'Valsorda', [10.7, 46.1])]);
 
   assert.deepEqual(matchedFeatures(out), []);
   assert.deepEqual(out.missing.map((r) => r.id), ['valley/w1']);
@@ -79,11 +81,11 @@ test('valleys get more slack than peaks, because their anchor slides', () => {
 
   const asValley = resolveFeatures(
     [feature('valley/w2', 'Testa', moved)],
-    [ref('valley/w1', { name: 'Testa', at })],
+    [ref('valley/w1', 'Testa', at)],
   );
   const asPeak = resolveFeatures(
     [feature('peak/n2', 'Testa', moved)],
-    [ref('peak/n1', { name: 'Testa', at })],
+    [ref('peak/n1', 'Testa', at)],
   );
 
   assert.deepEqual(matchedFeatures(asValley).map((f) => f.id), ['valley/w2'], 'valley rescued');
@@ -96,8 +98,8 @@ test('one pool feature is never handed to two references', () => {
   // could never be answered.
   const pool = [feature('valley/w1', 'Val Rendena', [10.75, 46.1])];
   const out = resolveFeatures(pool, [
-    ref('valley/w1', { name: 'Val Rendena', at: [10.75, 46.1] }),
-    ref('valley/w9', { name: 'Val Rendena', at: [10.76, 46.1] }),
+    ref('valley/w1', 'Val Rendena', [10.75, 46.1]),
+    ref('valley/w9', 'Val Rendena', [10.76, 46.1]),
   ]);
 
   assert.deepEqual(matchedFeatures(out).map((f) => f.id), ['valley/w1']);
@@ -110,44 +112,19 @@ test('an exact id wins over a rescue that would have taken it', () => {
   // one that actually owns the id would be reported missing.
   const pool = [feature('valley/w2', 'Val Rendena', [10.75, 46.1])];
   const out = resolveFeatures(pool, [
-    ref('valley/w1', { name: 'Val Rendena', at: [10.75, 46.1] }),
-    ref('valley/w2', { name: 'Val Rendena', at: [10.75, 46.1] }),
+    ref('valley/w1', 'Val Rendena', [10.75, 46.1]),
+    ref('valley/w2', 'Val Rendena', [10.75, 46.1]),
   ]);
 
   assert.deepEqual(matchedFeatures(out).map((f) => f.id), ['valley/w2']);
   assert.deepEqual(out.missing.map((r) => r.id), ['valley/w1']);
 });
 
-test('a legacy ref with no name or anchor still plays by id', () => {
-  const pool = [feature('peak/n1', 'Cima Tosa', [10.87, 46.16])];
-  const out = resolveFeatures(pool, [ref('peak/n1')]);
-
-  assert.deepEqual(matchedFeatures(out).map((f) => f.id), ['peak/n1']);
-  assert.deepEqual(out.missing, []);
-});
-
-test('a ref with no anchor declines to guess between two candidates', () => {
-  // It takes the only one when there is one, and refuses when there are two:
-  // an arbitrary pick between two Valsordas is worse than saying it cannot tell.
-  const one = resolveFeatures(
-    [feature('valley/w2', 'Valsorda', [10.7, 46.1])],
-    [ref('valley/w1', { name: 'Valsorda' })],
-  );
-  assert.deepEqual(matchedFeatures(one).map((f) => f.id), ['valley/w2'], 'the only candidate');
-
-  const two = resolveFeatures(
-    [feature('valley/w2', 'Valsorda', [10.7, 46.1]), feature('valley/w3', 'Valsorda', [11.6, 46.1])],
-    [ref('valley/w1', { name: 'Valsorda' })],
-  );
-  assert.deepEqual(matchedFeatures(two), [], 'two candidates, no basis to choose');
-  assert.deepEqual(two.missing.map((r) => r.id), ['valley/w1']);
-});
-
 test('a name match of the wrong kind is not a match', () => {
   // Passo Rolle the pass and Passo Rolle the peak are different questions.
   const pool = [feature('peak/n2', 'Passo Rolle', [11.79, 46.29])];
   const out = resolveFeatures(pool, [
-    ref('pass/n1', { name: 'Passo Rolle', at: [11.79, 46.29] }),
+    ref('pass/n1', 'Passo Rolle', [11.79, 46.29]),
   ]);
 
   assert.deepEqual(matchedFeatures(out), []);
@@ -160,9 +137,9 @@ test('quiz order is preserved, and what is gone is reported', () => {
     feature('peak/n3', 'Crozzon', [10.88, 46.17]),
   ];
   const out = resolveFeatures(pool, [
-    ref('peak/n3', { name: 'Crozzon', at: [10.88, 46.17] }),
-    ref('peak/n2', { name: 'Gone', at: [10.9, 46.2] }),
-    ref('peak/n1', { name: 'Cima Tosa', at: [10.87, 46.16] }),
+    ref('peak/n3', 'Crozzon', [10.88, 46.17]),
+    ref('peak/n2', 'Gone', [10.9, 46.2]),
+    ref('peak/n1', 'Cima Tosa', [10.87, 46.16]),
   ]);
 
   assert.deepEqual(matchedFeatures(out).map((f) => f.id), ['peak/n3', 'peak/n1']);

@@ -5,7 +5,7 @@
  * plain reads, and a quiz being unsaveable is not a reason to interrupt someone
  * mid-game. Failures degrade to "it just doesn't persist".
  */
-import type { KindId, QuizSpec } from './types.ts';
+import type { QuizSpec } from './types.ts';
 
 const QUIZ_KEY = 'terrain-nerd:quizzes';
 const BEST_KEY = 'terrain-nerd:best';
@@ -29,29 +29,7 @@ function write(key: string, value: unknown): boolean {
   }
 }
 
-/**
- * Brings a quiz saved by an older build up to the current shape.
- *
- * Quizzes used to hold bare `featureIds`. They now hold `FeatureRef`s, which
- * carry the name and anchor that let a moved id be found again — see
- * `resolve.ts`. An old quiz cannot know those, so it is lifted with the id and
- * the kind alone and plays exactly as it always did; `App.svelte` fills the
- * rest in from the pool the first time it is played, so the gap closes by being
- * used rather than by a migration script.
- *
- * Applied on the way in rather than in place, because the point of a migration
- * that runs on read is that nothing downstream has to know there was one.
- */
-export function migrateSpec(spec: QuizSpec): QuizSpec {
-  if (Array.isArray(spec.features)) return spec;
-  const { featureIds, ...rest } = spec;
-  return {
-    ...rest,
-    features: (featureIds ?? []).map((id) => ({ id, kind: id.split('/')[0] as KindId })),
-  };
-}
-
-export const loadQuizzes = (): QuizSpec[] => read<QuizSpec[]>(QUIZ_KEY, []).map(migrateSpec);
+export const loadQuizzes = (): QuizSpec[] => read<QuizSpec[]>(QUIZ_KEY, []);
 
 /** Adds or replaces by id, newest first. */
 export function saveQuiz(quiz: QuizSpec): QuizSpec[] {

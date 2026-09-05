@@ -270,7 +270,7 @@
   let reconciled = $state(false);
   $effect(() => {
     if (!editing || reconciled || pool.length === 0) return;
-    const saved = new Set(editing.featureIds);
+    const saved = new Set(editing.features.map((ref) => ref.id));
     const overrides = { ...builder.overrides };
     let pinned = 0;
 

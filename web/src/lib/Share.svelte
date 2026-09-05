@@ -4,13 +4,8 @@
   import type { Published } from './codec.ts';
   import type { QuizSpec } from './types.ts';
 
-  type Props = {
-    quiz: QuizSpec;
-    onclose: () => void;
-    /** Brings the quiz up to date against the pool before it is frozen. */
-    onprepare: (quiz: QuizSpec) => Promise<QuizSpec>;
-  };
-  let { quiz, onclose, onprepare }: Props = $props();
+  type Props = { quiz: QuizSpec; onclose: () => void };
+  let { quiz, onclose }: Props = $props();
 
   let phase = $state<'loading' | 'ready' | 'working'>('loading');
   let published = $state<Published | null>(null);
@@ -56,10 +51,7 @@
     phase = 'working';
     error = null;
     try {
-      // Never the quiz as the list happens to hold it: an older save may know
-      // only its features' ids, and a published copy with nothing to fall back
-      // on cannot be repaired once other people are holding it.
-      await session.publish(await onprepare(quiz));
+      await session.publish(quiz);
       published = await session.published(quiz.id);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

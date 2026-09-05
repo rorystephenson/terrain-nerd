@@ -139,14 +139,9 @@ export type BuilderState = {
 export type FeatureRef = {
   id: string;
   kind: KindId;
-  /**
-   * Absent on quizzes saved before this existed. Such a quiz can still be
-   * played by id; it simply has nothing to fall back on. The first round filled
-   * in from the pool repairs that, so the gap closes on its own.
-   */
-  name?: string;
+  name: string;
   /** The feature's own anchor, so same-named features can be told apart. */
-  at?: [number, number];
+  at: [number, number];
   /** The most durable key there is, when OSM carries one. */
   wikidata?: string;
 };
@@ -164,12 +159,6 @@ export type QuizSpec = {
   createdAt: string;
   /** Resolved at save time, so replaying always asks the same set. */
   features: FeatureRef[];
-  /**
-   * What `features` used to be, kept only so a quiz saved before it existed
-   * still loads. Read on the way in and never written; `migrateSpec` in
-   * `storage.ts` is the one place that looks at it.
-   */
-  featureIds?: string[];
   /** Derived from the chosen features, not from the builder viewport. */
   bbox: [number, number, number, number];
   /** Kept so editing can restore the sliders; never used to play. */

@@ -53,22 +53,25 @@ const isPoint = (v: unknown): v is [number, number] =>
 /**
  * One reference, or nothing.
  *
- * `id` and `kind` are the whole of what a reference must have — everything else
- * is the fallback material, and a reference missing it is a reference that can
- * only be resolved by id, which is exactly the state every quiz saved before
- * `FeatureRef` existed is already in. So a partial ref is kept, not dropped.
+ * All four of id, kind, name and anchor are required, because a reference
+ * without the last two can only ever be resolved by an id that may have moved —
+ * and a published quiz is the copy that cannot be repaired afterwards. Anything
+ * short of that is dropped rather than carried through as a feature the round
+ * might silently fail to find.
  */
 export function readRef(value: unknown): FeatureRef | null {
   if (typeof value !== 'object' || value === null) return null;
   const raw = value as Record<string, unknown>;
   if (typeof raw.id !== 'string' || raw.id.length === 0) return null;
   if (typeof raw.kind !== 'string' || !KINDS.has(raw.kind)) return null;
+  if (typeof raw.name !== 'string' || raw.name.length === 0) return null;
+  if (!isPoint(raw.at)) return null;
 
   return {
     id: raw.id,
     kind: raw.kind as KindId,
-    ...(typeof raw.name === 'string' && raw.name.length > 0 ? { name: raw.name } : {}),
-    ...(isPoint(raw.at) ? { at: raw.at } : {}),
+    name: raw.name,
+    at: raw.at,
     ...(typeof raw.wikidata === 'string' ? { wikidata: raw.wikidata } : {}),
   };
 }
@@ -144,8 +147,8 @@ export function specToDoc(spec: QuizSpec, ownerId: string, now: string): QuizDoc
     features: spec.features.slice(0, MAX_FEATURES).map((ref) => ({
       id: ref.id,
       kind: ref.kind,
-      ...(ref.name !== undefined ? { name: ref.name } : {}),
-      ...(ref.at !== undefined ? { at: ref.at } : {}),
+      name: ref.name,
+      at: ref.at,
       ...(ref.wikidata !== undefined ? { wikidata: ref.wikidata } : {}),
     })),
     bbox: spec.bbox,
@@ -238,8 +241,8 @@ export function specToPublished(
   const features = spec.features.slice(0, MAX_FEATURES).map((ref) => ({
     id: ref.id,
     kind: ref.kind,
-    ...(ref.name !== undefined ? { name: ref.name } : {}),
-    ...(ref.at !== undefined ? { at: ref.at } : {}),
+    name: ref.name,
+    at: ref.at,
     ...(ref.wikidata !== undefined ? { wikidata: ref.wikidata } : {}),
   }));
 
@@ -260,7 +263,7 @@ export function specToPublished(
       ...counts,
       // Not `features.length`: two features sharing a name are one question,
       // and the score is a percentage of questions.
-      questions: questionsIn(features.map((ref) => ref.name ?? ref.id)),
+      questions: questionsIn(features.map((ref) => ref.name)),
     },
     cells: cellsCovering(spec.bbox, CELL_ZOOM).slice(0, MAX_CELLS),
     cellZoom: CELL_ZOOM,
@@ -286,7 +289,7 @@ export function docToPublished(id: string, value: unknown): Published | null {
   const questions =
     typeof counts?.questions === 'number' && Number.isFinite(counts.questions)
       ? counts.questions
-      : questionsIn(spec.features.map((ref) => ref.name ?? ref.id));
+      : questionsIn(spec.features.map((ref) => ref.name));
 
   return {
     spec,

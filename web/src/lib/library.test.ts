@@ -9,7 +9,7 @@ const quiz = (id: string, over: Partial<QuizSpec> = {}): QuizSpec => ({
   name: id,
   source: 'built',
   createdAt: '2026-01-01T00:00:00.000Z',
-  features: [{ id: 'peak/n1', kind: 'peak' }],
+  features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] }],
   bbox: [10, 46, 11, 47],
   ...over,
 });
@@ -71,23 +71,27 @@ test('the same id with different contents is a conflict, not a silent overwrite'
   assert.equal(plan.conflicts[0].local.name, 'Brenta');
 });
 
-test('a quiz healed on one machine only is not a conflict', () => {
-  // The names and anchors are derivable from the pool, so a difference in them
-  // says nothing about intent and must not put a question in front of anyone.
-  const bare = quiz('a', { features: [{ id: 'peak/n1', kind: 'peak' }] });
-  const healed = quiz('a', {
+test('a difference only in derived detail is not a conflict', () => {
+  // Names and anchors come from the pool, so a difference in them says nothing
+  // about intent and must not put a question in front of anyone.
+  const here = quiz('a', {
     features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] }],
   });
+  const there = quiz('a', {
+    // The same feature, described from a pool built a day apart: the anchor
+    // moved a few metres and the spelling was tidied in OSM.
+    features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa ', at: [10.8711, 46.1566] }],
+  });
 
-  assert.equal(sameQuiz(bare, healed), true);
-  assert.deepEqual(planSync(side([bare]), side([healed])).conflicts, []);
+  assert.equal(sameQuiz(here, there), true);
+  assert.deepEqual(planSync(side([here]), side([there])).conflicts, []);
 });
 
 test('a different set of features is a conflict even under the same name', () => {
   const four = quiz('a', {
     features: [
-      { id: 'peak/n1', kind: 'peak' },
-      { id: 'peak/n2', kind: 'peak' },
+      { id: 'peak/n1', kind: 'peak', name: 'A', at: [10, 46] },
+      { id: 'peak/n2', kind: 'peak', name: 'B', at: [11, 46] },
     ],
   });
   assert.equal(sameQuiz(quiz('a'), four), false);

@@ -243,12 +243,29 @@ played anonymously and then signed up carries a token that still says
 `anonymous` on an account that is anything but — which is the ordinary path
 through this app, not an edge case.
 
-Publishing also brings a quiz up to date against the pool first. A quiz saved
-before features carried their own names holds bare ids until something loads
-the pool for it, and freezing one in that state ships a permanent public copy
-with nothing to fall back on when an id moves — see [Sharing](#sharing-a-quiz)
-above and `resolve.ts`. Almost always a no-op; the once it is not is the once
-that matters.
+### What a quiz holds, and why it is not just ids
+
+A quiz stores, per feature, the OSM id **and** the name, the kind, the anchor
+and the wikidata entity where there is one. The id alone would do almost all the
+time, and `resolve.ts` is what covers the rest: it tries the id, then the
+entity, then the name and anchor within a kind-dependent radius — 2 km for a
+summit, 10 km for a valley, whose anchor is the midpoint of its longest part and
+so *moves* when the cluster it was computed from gains or loses a segment. What
+cannot be found is reported rather than dropped, and the results screen names
+it.
+
+How much of that is actually needed is measurable, and worth stating rather than
+assuming. Peaks and passes are one OSM node each and keep that node's id for as
+long as it exists: making the merge deterministic moved **0 of 74,419 peaks and
+0 of 7,306 passes**. Valleys merge 6,772 named ways into 5,968 features, so most
+are a single way and just as stable — only the roughly one in eight built from
+several can move, and then only if its lowest-numbered member way is deleted or
+a lower-numbered one joins it. That change moved **123 of 5,968**, once.
+
+So this is insurance against a small and bounded risk, carried because a
+*published* quiz is a permanent thing other people hold and cannot be repaired
+after the fact. It is not there for legacy data — there is none, and the code
+that used to migrate and backfill older saves has been removed.
 
 **Popularity counts people, not rounds.** Finishing a quiz writes a marker
 document you can write once and can never delete, in the same commit as the
@@ -825,7 +842,6 @@ web/src/lib/
   places.ts        reading a name's zoom range          (pure)
   quiz.ts          quiz state machine                   (pure)
   resolve.ts       finding features whose ids moved      (pure)
-  heal.ts          what an old quiz learns by playing    (pure)
   route.ts         where the app is, as a URL            (pure)
   codec.ts         quizzes to and from Firestore         (pure)
   library.ts       reconciling this browser with the account (pure)
@@ -840,7 +856,7 @@ web/src/lib/
   thin.ts          one voice per cluster                (pure)
   tiles.ts         the tn:// protocol and coverage
   chunks.ts        cell loading and caching
-  storage.ts       localStorage, and the migration off older saves
+  storage.ts       localStorage
   MapView.svelte   MapLibre, both play and build modes
 ```
 
@@ -850,7 +866,7 @@ unit-tested — including six that live in the pipeline (`placeZoom.ts`,
 from here because this is where the test runner is:
 
 ```bash
-npm test             # 257 tests
+npm test             # 247 tests
 npm run typecheck    # pipeline, web and the tools
 npm run test:rules   # 25 rules tests, against the Firestore emulator (needs Java)
 npm run test:e2e     # signing in across two machines (needs the emulator + a dev server)

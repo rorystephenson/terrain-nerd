@@ -70,29 +70,36 @@ test('one malformed reference does not cost the whole quiz', () => {
   const doc = {
     ...specToDoc(spec(), 'u1', 'now'),
     features: [
-      { id: 'peak/n1', kind: 'peak', name: 'Cima Tosa' },
-      { id: 'peak/n2', kind: 'wyvern' }, // not a kind this app has
+      { id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] },
+      { id: 'peak/n2', kind: 'wyvern', name: 'X', at: [10, 46] }, // not a kind this app has
       null,
-      { kind: 'peak' }, // no id
-      { id: 'valley/w3', kind: 'valley' },
+      { kind: 'peak', name: 'X', at: [10, 46] }, // no id
+      { id: 'peak/n4', kind: 'peak', at: [10, 46] }, // no name: cannot be rescued
+      { id: 'peak/n5', kind: 'peak', name: 'Y' }, // no anchor: likewise
+      { id: 'valley/w3', kind: 'valley', name: 'Val', at: [10.75, 46.1] },
     ],
   };
   assert.deepEqual(docToSpec('q1', doc)?.features.map((f) => f.id), ['peak/n1', 'valley/w3']);
 });
 
 test('a reference keeps what it has and omits what it does not', () => {
-  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak' }), { id: 'peak/n1', kind: 'peak' });
-  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', at: [1, 2], name: 'X', wikidata: 'Q1' }), {
+  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2] }), {
+    id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2],
+  });
+  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2], wikidata: 'Q1' }), {
     id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2], wikidata: 'Q1',
   });
-  // A malformed anchor is dropped, not carried through as a bad coordinate.
-  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', at: [1] }), { id: 'peak/n1', kind: 'peak' });
-  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', at: 'somewhere' }), { id: 'peak/n1', kind: 'peak' });
+  // A reference that cannot be rescued by name and place is not one we keep:
+  // it could only ever be resolved by an id that may have moved.
+  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', at: [1, 2] }), null, 'no name');
+  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', name: 'X' }), null, 'no anchor');
+  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: [1] }), null, 'half an anchor');
+  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: 'there' }), null);
 });
 
 test('an oversized quiz is clamped rather than written whole', () => {
   const many = Array.from({ length: MAX_FEATURES + 50 }, (_, i) => ({
-    id: `peak/n${i}`, kind: 'peak' as const,
+    id: `peak/n${i}`, kind: 'peak' as const, name: `Peak ${i}`, at: [10, 46] as [number, number],
   }));
   assert.equal(specToDoc(spec({ features: many }), 'u1', 'now').features.length, MAX_FEATURES);
 });

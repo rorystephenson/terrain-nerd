@@ -15,8 +15,6 @@
     ondelete: (quiz: QuizSpec) => void;
     /** A link pointed at a quiz that is not there any more. */
     missing: boolean;
-    /** Brings a quiz up to date against the pool before it is published. */
-    onprepare: (quiz: QuizSpec) => Promise<QuizSpec>;
   };
 
   let {
@@ -29,7 +27,6 @@
     onedit,
     ondelete,
     missing,
-    onprepare,
   }: Props = $props();
 
   const total = $derived(index.kinds.reduce((sum, kind) => sum + kind.count, 0));
@@ -87,7 +84,7 @@
           <button class="icon" title="Delete" aria-label="Delete {quiz.name}" onclick={() => ondelete(quiz)}>×</button>
         </li>
         {#if sharing === quiz.id}
-          <li class="panel"><Share {quiz} {onprepare} onclose={() => (sharing = null)} /></li>
+          <li class="panel"><Share {quiz} onclose={() => (sharing = null)} /></li>
         {/if}
       {/each}
     </ul>

@@ -11,7 +11,6 @@
   import { loadIndex, loadPlaces, loadRefs } from './lib/chunks.ts';
   import { placeFetchBox } from './lib/places.ts';
   import { matchedFeatures } from './lib/resolve.ts';
-  import { healSpec } from './lib/heal.ts';
   import { useCoverage } from './lib/tiles.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
   import { session } from './lib/session.svelte.ts';
@@ -139,19 +138,7 @@
         const found = matchedFeatures(resolved);
         features = found;
         quiz = createQuiz(found);
-        gone = resolved.missing.map((ref) => ref.name ?? ref.id);
-        // The pool has just handed us names and anchors for everything this
-        // quiz refers to, so a quiz saved before it carried them can be filled
-        // in now. Playing an old quiz is what repairs it — see `migrateSpec`.
-        //
-        // Only ever a quiz that is already yours. Someone else's, opened from a
-        // link, resolves against the same pool and so "heals" just as readily —
-        // and saving that would put it in your list the moment you looked at
-        // it, which is precisely what the offer to keep it exists to ask.
-        const healed = healSpec(spec, resolved);
-        if (healed !== spec && quizzes.some((quiz) => quiz.id === spec.id)) {
-          session.save(healed);
-        }
+        gone = resolved.missing.map((ref) => ref.name);
       })
       .catch((error: unknown) => {
         if (!cancelled) loadError = error instanceof Error ? error.message : String(error);
@@ -284,27 +271,6 @@
     if (current.at !== 'play' || !current.shared) return false;
     return !quizzes.some((quiz) => quiz.id === current.spec.id);
   });
-  /**
-   * Fills in what a quiz does not know about itself, before it is frozen.
-   *
-   * A quiz migrated from an older save holds bare ids until something loads the
-   * pool for it, which normally happens the first time it is played. Publishing
-   * one in that state ships a permanent public copy with nothing to fall back
-   * on when an id moves — which is the whole thing `resolve.ts` exists for, and
-   * a published quiz is the copy that most needs it, since it is the one other
-   * people are holding.
-   *
-   * So publishing loads the pool the same way playing does. Almost always a
-   * no-op, and the once it is not, it is the once that matters.
-   */
-  async function preparePublish(spec: QuizSpec): Promise<QuizSpec> {
-    if (!index) return spec;
-    const resolved = await loadRefs(index, spec.bbox, spec.features);
-    const healed = healSpec(spec, resolved);
-    if (healed !== spec) session.save(healed);
-    return healed;
-  }
-
   function keepShared() {
     const current = screen;
     if (current.at === 'play') session.keep(current.spec);
@@ -576,7 +542,6 @@
       {quizzes}
       {best}
       missing={missingQuiz}
-      onprepare={preparePublish}
       onbuild={() => show({ at: 'build', editing: null })}
       onbrowse={() => show({ at: 'browse' })}
       onplay={play}
