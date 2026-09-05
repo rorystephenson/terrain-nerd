@@ -1,19 +1,30 @@
 <script lang="ts">
+  import BrowseMap from './BrowseMap.svelte';
+  import { spanKm } from './discover.ts';
   import { session } from './session.svelte.ts';
   import type { Published } from './codec.ts';
-  import type { QuizSpec } from './types.ts';
+  import type { PoolIndex, QuizSpec } from './types.ts';
 
   type Props = {
     onplay: (published: Published) => void;
     onback: () => void;
     /** Your own quizzes, so a row can say you already have it. */
     mine: QuizSpec[];
+    /** The pool, for the map: it says which ground the basemap covers. */
+    index: PoolIndex;
   };
-  let { onplay, onback, mine }: Props = $props();
+  let { onplay, onback, mine, index }: Props = $props();
 
-  type Tab = 'popular' | 'new' | 'near';
+  /**
+   * `map` is a view of the same catalogue, not a fourth query.
+   *
+   * It is first because "where is it" is the question the list could never
+   * answer, and the one most often asked about somebody else's quiz. The lists
+   * remain the way to find the busiest or the newest regardless of where it is.
+   */
+  type Tab = 'map' | 'popular' | 'new' | 'near';
 
-  let tab = $state<Tab>('popular');
+  let tab = $state<Tab>('map');
   let loading = $state(true);
   let found = $state.raw<Published[]>([]);
   let failed = $state(false);
@@ -23,6 +34,7 @@
 
   $effect(() => {
     const wanted = tab;
+    if (wanted === 'map') return;
     let cancelled = false;
     loading = true;
     failed = false;
@@ -46,7 +58,13 @@
   const held = $derived(new Set(mine.map((quiz) => quiz.id)));
 
   const summary = (quiz: Published) => {
-    const bits = [`${quiz.questions} ${quiz.questions === 1 ? 'question' : 'questions'}`];
+    const bits = [
+      `${quiz.questions} ${quiz.questions === 1 ? 'question' : 'questions'}`,
+      // How far the quiz reaches. Not where it is — that is what the map is for
+      // — but enough to tell a single ridge from a day's flying before opening
+      // it, which the list could not say at all.
+      `${Math.round(spanKm(quiz.spec.bbox))} km`,
+    ];
     if (quiz.players > 0) {
       bits.push(`${quiz.players} ${quiz.players === 1 ? 'player' : 'players'}`);
     }
@@ -54,13 +72,14 @@
   };
 </script>
 
-<div class="browse">
+<div class="browse" class:browse--map={tab === 'map'}>
   <header>
     <button class="back" onclick={onback}>← Your quizzes</button>
     <h1>Quizzes people have shared</h1>
   </header>
 
   <nav>
+    <button class:on={tab === 'map'} onclick={() => (tab = 'map')}>Map</button>
     <button class:on={tab === 'popular'} onclick={() => (tab = 'popular')}>Most played</button>
     <button class:on={tab === 'new'} onclick={() => (tab = 'new')}>New</button>
     {#if hasGround}
@@ -68,7 +87,9 @@
     {/if}
   </nav>
 
-  {#if loading}
+  {#if tab === 'map'}
+    <BrowseMap {index} {mine} {onplay} />
+  {:else if loading}
     <p class="muted">Looking…</p>
   {:else if failed}
     <p class="muted">Could not reach the quiz list. Yours are all still here.</p>
@@ -115,6 +136,18 @@
     padding: clamp(1.25rem, 4vw, 2.5rem) 1.25rem 2rem;
     max-width: 44rem;
     margin: 0 auto;
+  }
+  /*
+   * The map fills what is left rather than scrolling: a map you have to scroll
+   * to see the bottom of is a map you cannot pan, because the drag that would
+   * pan it scrolls the page instead.
+   */
+  .browse--map {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-width: 60rem;
+    padding-bottom: 1.25rem;
   }
   header { margin-bottom: 1.25rem; }
   .back {

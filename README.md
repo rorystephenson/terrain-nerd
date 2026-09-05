@@ -290,8 +290,36 @@ where it is checked.
 
 ## Finding one
 
-`/browse` lists what other people have published, in three orderings and no
-more.
+`/browse` opens on a **map**, because where a quiz is, is most of what you want
+to know about somebody else's — and a list is the one shape that cannot say it.
+Every published document has carried its `bbox` and its z7 `cells` since it was
+first written; the map is what reads them. Each quiz is a footprint on the
+relief with a plate naming it, and the ground on screen is what is queried, so
+panning is browsing.
+
+Three things about it were not obvious until it was built, and all three are in
+`discover.ts`, which is pure and tested:
+
+- **Plates gather into groups by an ellipse, not a circle.** A plate is a name
+  on a rounded rectangle — wide and short. Two of them 50 px apart across the
+  screen are printed on top of one another; the same 50 px down the screen
+  leaves both perfectly readable. One radius has to get one of those wrong.
+- **A group absorbs only what is within reach of itself**, never what is merely
+  within reach of something it absorbed. Chaining is single-linkage clustering,
+  and its failure here is a line of quizzes down a valley collapsing into one
+  plate centred on ground none of them cover.
+- **A pin off the edge is not drawn at all.** These are DOM buttons, not symbols
+  in the style — the style has no symbol layers, the same decision that makes
+  place names HTML on the quiz map — so one left in the document for a quiz five
+  hundred kilometres away is clipped from sight but not from the tab order.
+
+Pressing a group flies to the quizzes in it, which is what separates them.
+Pressing a single quiz opens its card. With no quizzes of your own the map opens
+on the whole pool and then settles onto wherever the published ones turned out
+to be, once; that offer is withdrawn the moment you move the map yourself.
+
+The same catalogue is behind three list orderings, which remain the way to find
+the busiest or the newest regardless of where it is.
 
 **Most played** ranks on distinct players, not rounds — see the counter above,
 which cannot be moved twice by the same person. **New** is `publishedAt`
@@ -874,6 +902,8 @@ web/src/lib/
   Account.svelte   signing in, and the one offer to do so
   Share.svelte     publishing a quiz, and the link it gets
   Browse.svelte    what other people have published
+  BrowseMap.svelte the same, on the ground it is about
+  discover.ts      pins, groups and the ground to ask about (pure)
   labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid        (pure)
   thin.ts          one voice per cluster                (pure)
@@ -889,11 +919,12 @@ unit-tested — including six that live in the pipeline (`placeZoom.ts`,
 from here because this is where the test runner is:
 
 ```bash
-npm test             # 238 tests
+npm test             # 259 tests
 npm run typecheck    # pipeline, web and the tools
 npm run test:rules   # 25 rules tests, against the Firestore emulator (needs Java)
 npm run test:e2e     # signing in across two machines (needs the emulator + a dev server)
 npm run test:share   # publishing and opening a link  (likewise)
+npm run test:browse  # the browse map, on a real projection (likewise)
 ```
 
 ## Known gaps

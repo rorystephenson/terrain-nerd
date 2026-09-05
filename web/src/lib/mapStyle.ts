@@ -1,6 +1,7 @@
 import type {
   ExpressionSpecification,
   FilterSpecification,
+  RasterSourceSpecification,
   StyleSpecification,
 } from 'maplibre-gl';
 
@@ -455,6 +456,80 @@ export function buildBasemapStyle(vectorTiles: string): StyleSpecification {
 const TILE_BASE = import.meta.env?.VITE_TILE_BASE ?? '/tiles';
 
 /**
+ * The whole basemap, drawn beforehand: relief, both hillshade passes, glaciers,
+ * sea, rivers, lakes and roads, flattened into one image per tile. What the
+ * browser used to compute from a 5 MB stream of elevation on every view now
+ * arrives as about 40 KB of picture.
+ *
+ * A function rather than a constant because two styles now mount it — the quiz
+ * and the browse map — and a shared object would be handed to two live maps to
+ * mutate. Shared for the same reason everything else in this file is: a second
+ * copy of the zoom range or the attribution would drift, and drift would show
+ * only as a map that quietly stops matching the one beside it.
+ */
+const basemapSource = (): RasterSourceSpecification => ({
+  type: 'raster',
+  tiles: [`tn://${TILE_BASE}/{z}/{x}/{y}.webp`],
+  tileSize: 512,
+  minzoom: 4,
+  maxzoom: 11,
+  attribution: '© OpenStreetMap contributors (ODbL) · Terrain: Mapzen / AWS Open Data',
+});
+
+/**
+ * The ground under the browse map: relief, and every published quiz's footprint
+ * laid over it.
+ *
+ * No text. The style has no symbol layers — see the note above `buildFeatures`
+ * — so the names and counts on this map are DOM pins placed by `BrowseMap`,
+ * the same arrangement the quiz map uses for place names. What is drawn here is
+ * only the ground each quiz covers, which is the thing a list could never say.
+ *
+ * Hover and selection are feature state rather than a filter or a rebuilt
+ * source, so pointing at a quiz repaints one polygon instead of handing the map
+ * a new GeoJSON document on every mouse move.
+ */
+export function buildFootprints(areas: GeoJSON.FeatureCollection): StyleSpecification {
+  const lit: ExpressionSpecification = ['boolean', ['feature-state', 'on'], false];
+  return {
+    version: 8,
+    sources: {
+      basemap: basemapSource(),
+      areas: { type: 'geojson', data: areas, promoteId: 'id' },
+    },
+    layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#e8eae4' } },
+      { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 1 } },
+      {
+        id: 'areas-fill',
+        type: 'fill',
+        source: 'areas',
+        paint: {
+          'fill-color': PICKED,
+          /*
+           * Faint by default and deliberately so. Footprints overlap wherever
+           * people fly, and an opacity that reads well alone stacks into an
+           * opaque blob over three quizzes — which hides exactly the terrain
+           * you are choosing by.
+           */
+          'fill-opacity': ['case', lit, 0.24, 0.07],
+        },
+      },
+      {
+        id: 'areas-line',
+        type: 'line',
+        source: 'areas',
+        paint: {
+          'line-color': PICKED,
+          'line-width': ['case', lit, 2.4, 1.2],
+          'line-opacity': ['case', lit, 1, 0.65],
+        },
+      },
+    ],
+  };
+}
+
+/**
  * The style the app draws: the quiz, over a picture of the ground.
  *
  * Thirteen of its fifteen layers are the features being quizzed — valleys,
@@ -475,20 +550,7 @@ export function buildFeatures(
   return {
     version: 8,
     sources: {
-      /*
-       * The whole basemap, drawn beforehand: relief, both hillshade passes,
-       * glaciers, sea, rivers, lakes and roads, flattened into one image per
-       * tile. What the browser used to compute from a 5 MB stream of elevation
-       * on every view now arrives as about 40 KB of picture.
-       */
-      basemap: {
-        type: 'raster',
-        tiles: [`tn://${TILE_BASE}/{z}/{x}/{y}.webp`],
-        tileSize: 512,
-        minzoom: 4,
-        maxzoom: 11,
-        attribution: '© OpenStreetMap contributors (ODbL) · Terrain: Mapzen / AWS Open Data',
-      },
+      basemap: basemapSource(),
       features: { type: 'geojson', data: features, promoteId: 'idx' },
     },
     layers: [

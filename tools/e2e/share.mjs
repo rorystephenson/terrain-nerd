@@ -141,6 +141,10 @@ console.log('v1 still says :', stillV1.fields.name.stringValue,
 // wiring and the production REST probe proves the indexes.
 const stranger = await open(browser, APP.replace(/\/$/, '') + '/browse', []);
 await stranger.waitForTimeout(2500);
+// The map is what browse opens on — see `browse.mjs`, which covers it. The
+// lists are behind their own tabs, so this has to ask for one.
+await stranger.locator('nav button:has-text("Most played")').click();
+await stranger.waitForTimeout(2000);
 const listed = await stranger.evaluate(() =>
   [...document.querySelectorAll('.row')].map((r) => r.innerText.replace(/\n/g, ' · ')));
 console.log('\nbrowse (popular):', JSON.stringify(listed));
@@ -155,6 +159,8 @@ console.log('  under New     :', await stranger.evaluate(() =>
 // "Your ground" is offered only to someone whose own quizzes give it meaning.
 const local = await open(browser, APP.replace(/\/$/, '') + '/browse', quiz);
 await local.waitForTimeout(2500);
+await local.locator('nav button:has-text("Most played")').click();
+await local.waitForTimeout(1500);
 console.log('  with quizzes  :', await local.evaluate(() =>
   [...document.querySelectorAll('nav button')].map((b) => b.innerText)));
 await local.locator('nav button:has-text("Your ground")').click();

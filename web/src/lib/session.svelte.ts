@@ -359,6 +359,20 @@ class Session {
     return cloud.listNear(this.myCells);
   }
 
+  /**
+   * Quizzes over a particular piece of ground, for the browse map.
+   *
+   * `null` cells mean the view is too wide to ask by ground — see `queryCells`
+   * — so the answer becomes "the most played anywhere", which is the honest one
+   * at a view that covers half a country. Asking for a sliced cell list instead
+   * would leave whole regions blank with nothing to say they had been dropped.
+   */
+  async discoverIn(cells: readonly string[] | null) {
+    const cloud = this.#cloud ?? (await this.#cloudReady);
+    if (!cloud) return [];
+    return cells === null ? cloud.listPopular() : cloud.listNear(cells);
+  }
+
   async signOut(): Promise<void> {
     if (!this.#cloud) return;
     this.#detach();

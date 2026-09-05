@@ -449,6 +449,7 @@
     <div class="centred"><p class="hint">Loading terrain…</p></div>
   {:else if screen.at === 'browse'}
     <Browse
+      {index}
       mine={quizzes}
       onback={toList}
       onplay={(published) => play(published.spec, published)}
