@@ -19,6 +19,7 @@
 
 export type Route =
   | { at: 'list' }
+  | { at: 'browse' }
   | { at: 'build'; quizId: string | null }
   /** A published quiz, by id. `version` addresses an exact frozen copy. */
   | { at: 'quiz'; quizId: string; version?: number };
@@ -57,6 +58,7 @@ export function parseRoute(href: string): Route {
   if (parts.length === 2 && parts[0] === 'q' && ID.test(parts[1])) {
     return { at: 'quiz', quizId: parts[1], version: versionOf(url.searchParams.get('v')) };
   }
+  if (parts.length === 1 && parts[0] === 'browse') return { at: 'browse' };
   if (parts.length === 1 && parts[0] === 'build') return { at: 'build', quizId: null };
   if (parts.length === 2 && parts[0] === 'build' && ID.test(parts[1])) {
     return { at: 'build', quizId: parts[1] };
@@ -70,6 +72,8 @@ export function routeUrl(route: Route): string {
   switch (route.at) {
     case 'list':
       return '/';
+    case 'browse':
+      return '/browse';
     case 'build':
       return route.quizId ? `/build/${route.quizId}` : '/build';
     case 'quiz':

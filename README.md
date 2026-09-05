@@ -257,6 +257,29 @@ at all, and the number is provably distinct players rather than something a
 client asserts. The rules enforce that, not the app; `npm run test:rules` is
 where it is checked.
 
+## Finding one
+
+`/browse` lists what other people have published, in three orderings and no
+more.
+
+**Most played** ranks on distinct players, not rounds — see the counter above,
+which cannot be moved twice by the same person. **New** is `publishedAt`
+descending. **Your ground** is the one worth having: quizzes over the ground you
+already have quizzes for, matched on the same z7 mercator cells the pool is
+chunked with (`cellsCovering` in `grid.ts`, one array field, one composite
+index — no geohash library and no second coordinate system). It is offered only
+when you have quizzes of your own to derive ground from, and it is deliberately
+not geolocation: someone with two quizzes in the Brenta has already said which
+mountains they care about, and a browser permission prompt would be both
+intrusive and wrong for anyone planning a trip somewhere they are not standing.
+
+There is no **trending**, and there should not be a fake one. Decaying
+popularity over time has to be recomputed on a schedule, which wants Cloud
+Functions, or held in a field the client writes, which is a ranking the client
+controls. Two honest orderings beat a third that flatters whoever refreshes it.
+
+Firestore cannot do text search either, so there is no search box.
+
 Opening a link that no longer resolves lands on your own list saying so. The
 commonest reason is a quiz that has been unpublished, which is not the visitor's
 mistake and should not look like an error.
@@ -811,6 +834,7 @@ web/src/lib/
   firebase.ts      the project config, which is not a secret
   Account.svelte   signing in, and the one offer to do so
   Share.svelte     publishing a quiz, and the link it gets
+  Browse.svelte    what other people have published
   labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid        (pure)
   thin.ts          one voice per cluster                (pure)
@@ -826,7 +850,7 @@ unit-tested — including six that live in the pipeline (`placeZoom.ts`,
 from here because this is where the test runner is:
 
 ```bash
-npm test             # 264 tests
+npm test             # 257 tests
 npm run typecheck    # pipeline, web and the tools
 npm run test:rules   # 25 rules tests, against the Firestore emulator (needs Java)
 npm run test:e2e     # signing in across two machines (needs the emulator + a dev server)

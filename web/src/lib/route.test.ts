@@ -26,6 +26,11 @@ test('a nonsense version is no version, not an error', () => {
   }
 });
 
+test('browsing has an address', () => {
+  assert.deepEqual(at('/browse'), { at: 'browse' });
+  assert.equal(routeUrl({ at: 'browse' }), '/browse');
+});
+
 test('the builder has an address, with and without a quiz', () => {
   assert.deepEqual(at('/build'), { at: 'build', quizId: null });
   assert.deepEqual(at('/build/abc123'), { at: 'build', quizId: 'abc123' });
@@ -50,6 +55,7 @@ test('an id that is not an id is not a quiz', () => {
 test('every route round-trips through its own URL', () => {
   const routes = [
     { at: 'list' as const },
+    { at: 'browse' as const },
     { at: 'build' as const, quizId: null },
     { at: 'build' as const, quizId: 'abc123' },
     { at: 'quiz' as const, quizId: 'abc123', version: undefined },

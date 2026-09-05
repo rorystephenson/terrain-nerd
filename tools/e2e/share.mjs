@@ -50,7 +50,9 @@ async function signUp(page) {
 
 const open = async (browser, url, seed) => {
   const ctx = await browser.newContext();
-  if (seed) await ctx.addInitScript(([q]) => localStorage.setItem('terrain-nerd:quizzes', JSON.stringify(q)), [seed]);
+  if (seed !== undefined) {
+    await ctx.addInitScript(([q]) => localStorage.setItem('terrain-nerd:quizzes', JSON.stringify(q)), [seed]);
+  }
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -139,6 +141,40 @@ console.log('\nrepublished   : version', v2.fields.version.integerValue,
 const stillV1 = await (await fetch(`${FS}/published/brenta1/versions/1`, ADMIN)).json();
 console.log('v1 still says :', stillV1.fields.name.stringValue,
             'with', stillV1.fields.features.arrayValue.values.length, 'features');
+
+// ---- Discovery -----------------------------------------------------------
+// A different person entirely, with no quizzes of their own: the browse screen
+// has to work for someone who has never built anything, since that is who it is
+// for. Note the emulator does not enforce composite indexes, so this proves the
+// wiring and the production REST probe proves the indexes.
+const stranger = await open(browser, APP.replace(/\/$/, '') + '/browse', []);
+await stranger.waitForTimeout(2500);
+const listed = await stranger.evaluate(() =>
+  [...document.querySelectorAll('.row')].map((r) => r.innerText.replace(/\n/g, ' · ')));
+console.log('\nbrowse (popular):', JSON.stringify(listed));
+console.log('  tabs offered  :', await stranger.evaluate(() =>
+  [...document.querySelectorAll('nav button')].map((b) => b.innerText)));
+
+await stranger.locator('nav button:has-text("New")').click();
+await stranger.waitForTimeout(2000);
+console.log('  under New     :', await stranger.evaluate(() =>
+  [...document.querySelectorAll('.row')].map((r) => r.innerText.split('\n')[0])));
+
+// "Your ground" is offered only to someone whose own quizzes give it meaning.
+const local = await open(browser, APP.replace(/\/$/, '') + '/browse', quiz);
+await local.waitForTimeout(2500);
+console.log('  with quizzes  :', await local.evaluate(() =>
+  [...document.querySelectorAll('nav button')].map((b) => b.innerText)));
+await local.locator('nav button:has-text("Your ground")').click();
+await local.waitForTimeout(2000);
+console.log('  on your ground:', await local.evaluate(() =>
+  [...document.querySelectorAll('.row')].map((r) => r.innerText.split('\n')[0])));
+
+// Playing one from the browse list is playing a shared quiz.
+await local.locator('.row').first().click();
+await local.waitForTimeout(3000);
+console.log('  clicking one  :', await local.evaluate(() =>
+  ({ url: location.pathname, top: document.body.innerText.split('\n').filter(Boolean)[0] })));
 
 const missing = await open(browser, APP.replace(/\/$/, '') + '/q/doesnotexist');
 await missing.waitForTimeout(2000);

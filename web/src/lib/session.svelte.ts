@@ -19,6 +19,8 @@
  * switched off — everything keeps working against localStorage, which is where
  * it all was before any of this existed.
  */
+import { CELL_ZOOM } from './codec.ts';
+import { cellsCovering } from './grid.ts';
 import { mergeBest, planSync, type SyncPlan } from './library.ts';
 import {
   deleteQuiz as removeLocal,
@@ -81,6 +83,8 @@ class Session {
   #switching = false;
 
   #cloud: Cloud | null = null;
+  /** Resolves once the SDK has loaded, or to null if it never will. */
+  #cloudReady: Promise<Cloud | null> = Promise.resolve(null);
   #stopAuth: (() => void) | null = null;
   #stopData: Array<() => void> = [];
 
@@ -88,7 +92,7 @@ class Session {
     this.quizzes = loadQuizzes();
     this.best = loadBest();
 
-    void import('./cloud.ts')
+    this.#cloudReady = import('./cloud.ts')
       .then((cloud) => {
         this.#cloud = cloud;
         this.status = 'syncing';
@@ -96,9 +100,11 @@ class Session {
           this.error = error.message;
         });
         this.#stopAuth = cloud.watchAccount((account) => this.#onAccount(account));
+        return cloud;
       })
       .catch(() => {
         // No cloud today. localStorage is doing the job.
+        return null;
       });
   }
 
@@ -317,6 +323,40 @@ class Session {
    */
   keep(shared: QuizSpec): void {
     this.save({ ...shared, source: 'shared' });
+  }
+
+  /**
+   * The ground this person already cares about, as discovery cells.
+   *
+   * Taken from their own quizzes rather than from the browser's location. It is
+   * a better answer and it asks for no permission: someone with two quizzes in
+   * the Brenta has said plainly which mountains they are interested in, where a
+   * location prompt is both intrusive and wrong for anyone planning a trip
+   * somewhere they are not currently standing.
+   */
+  get myCells(): string[] {
+    const cells = new Set<string>();
+    for (const quiz of this.quizzes) {
+      for (const cell of cellsCovering(quiz.bbox, CELL_ZOOM)) cells.add(cell);
+    }
+    return [...cells];
+  }
+
+  /**
+   * Waits for the SDK rather than reporting an empty catalogue without it.
+   *
+   * Discovery is the one thing that runs on mount, and the SDK is fetched by
+   * dynamic import so the map does not wait behind it — so on a cold load of
+   * `/browse`, which is exactly how somebody arrives at this screen, the query
+   * was being asked before there was anything to ask. It answered "nothing
+   * published", which is indistinguishable from the truth and never retried.
+   */
+  async discover(what: 'popular' | 'new' | 'near') {
+    const cloud = this.#cloud ?? (await this.#cloudReady);
+    if (!cloud) return [];
+    if (what === 'popular') return cloud.listPopular();
+    if (what === 'new') return cloud.listNewest();
+    return cloud.listNear(this.myCells);
   }
 
   async signOut(): Promise<void> {

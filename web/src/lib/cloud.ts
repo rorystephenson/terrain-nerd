@@ -33,8 +33,12 @@ import {
   getDocs,
   increment,
   initializeFirestore,
+  limit as take,
   memoryLocalCache,
   onSnapshot,
+  orderBy,
+  query,
+  where,
   persistentLocalCache,
   persistentMultipleTabManager,
   runTransaction,
@@ -413,4 +417,79 @@ export async function recordPlay(quizId: string): Promise<void> {
     // counter is only ever an approximation of counting the markers, so
     // losing one is not worth telling anybody about.
   });
+}
+
+
+/**
+ * Finding quizzes other people have published.
+ *
+ * Three lists, all plain indexed queries, all readable without an account —
+ * a link should work for a stranger and so should the browse screen.
+ *
+ * There is deliberately no *trending*. Any decay of popularity over time has to
+ * be either recomputed on a schedule, which wants Cloud Functions, or held in a
+ * field the client writes, which would mean a ranking the client controls. Two
+ * honest orderings beat a third that flatters whoever refreshes it.
+ */
+const DISCOVER_LIMIT = 24;
+
+function readPublished(snap: Awaited<ReturnType<typeof getDocs>>): Published[] {
+  const out: Published[] = [];
+  for (const d of snap.docs) {
+    const published = docToPublished(d.id, d.data());
+    if (published) out.push(published);
+  }
+  return out;
+}
+
+const published = () => collection(connect().db, 'published');
+
+/** Most distinct players, which is what `players` counts. Never most rounds. */
+export async function listPopular(): Promise<Published[]> {
+  return readPublished(
+    await getDocs(
+      query(published(), where('hidden', '==', false), orderBy('players', 'desc'), take(DISCOVER_LIMIT)),
+    ),
+  );
+}
+
+export async function listNewest(): Promise<Published[]> {
+  return readPublished(
+    await getDocs(
+      query(
+        published(),
+        where('hidden', '==', false),
+        orderBy('publishedAt', 'desc'),
+        take(DISCOVER_LIMIT),
+      ),
+    ),
+  );
+}
+
+/**
+ * Quizzes over ground you already have quizzes for.
+ *
+ * The cells come from the caller — in practice the union of the cells your own
+ * quizzes sit in, which is a better answer than geolocation and asks for no
+ * permission: someone who has built two quizzes in the Brenta is telling you
+ * plainly which mountains they care about, and a browser prompt would be both
+ * intrusive and wrong for anyone planning a trip somewhere else.
+ *
+ * `array-contains-any` takes at most thirty values, hence the slice — z7 cells
+ * are ~200 km across, so thirty of them is more ground than anyone has quizzes
+ * for.
+ */
+export async function listNear(cells: readonly string[]): Promise<Published[]> {
+  if (cells.length === 0) return [];
+  return readPublished(
+    await getDocs(
+      query(
+        published(),
+        where('cells', 'array-contains-any', cells.slice(0, 30)),
+        where('hidden', '==', false),
+        orderBy('players', 'desc'),
+        take(DISCOVER_LIMIT),
+      ),
+    ),
+  );
 }

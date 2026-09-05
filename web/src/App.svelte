@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import Browse from './lib/Browse.svelte';
   import Builder from './lib/Builder.svelte';
   import Confirm from './lib/Confirm.svelte';
   import MapView from './lib/MapView.svelte';
@@ -46,6 +47,7 @@
 
   type Screen =
     | { at: 'list' }
+    | { at: 'browse' }
     | { at: 'build'; editing: QuizSpec | null }
     /** `shared` is set when this quiz came from a link rather than from here. */
     | { at: 'play'; spec: QuizSpec; shared: Published | null };
@@ -349,6 +351,7 @@
    */
   const routeOf = (current: Screen): Route => {
     if (current.at === 'list') return { at: 'list' };
+    if (current.at === 'browse') return { at: 'browse' };
     if (current.at === 'build') return { at: 'build', quizId: current.editing?.id ?? null };
     return { at: 'quiz', quizId: current.spec.id, version: current.shared?.version };
   };
@@ -372,6 +375,7 @@
   async function goTo(route: Route) {
     missingQuiz = false;
     if (route.at === 'list') return show({ at: 'list' }, false);
+    if (route.at === 'browse') return show({ at: 'browse' }, false);
     if (route.at === 'build') {
       const editing = route.quizId ? (session.quizzes.find((q) => q.id === route.quizId) ?? null) : null;
       return show({ at: 'build', editing }, false);
@@ -479,6 +483,12 @@
     </div>
   {:else if !index}
     <div class="centred"><p class="hint">Loading terrain…</p></div>
+  {:else if screen.at === 'browse'}
+    <Browse
+      mine={quizzes}
+      onback={toList}
+      onplay={(published) => play(published.spec, published)}
+    />
   {:else if screen.at === 'build'}
     <!-- Keyed so editing a different quiz starts from that quiz's own state. -->
     {#key screen.editing?.id ?? 'new'}
@@ -568,6 +578,7 @@
       missing={missingQuiz}
       onprepare={preparePublish}
       onbuild={() => show({ at: 'build', editing: null })}
+      onbrowse={() => show({ at: 'browse' })}
       onplay={play}
       onedit={(spec) => show({ at: 'build', editing: spec })}
       ondelete={onDelete}

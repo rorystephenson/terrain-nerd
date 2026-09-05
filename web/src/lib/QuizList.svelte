@@ -9,6 +9,7 @@
     /** Best first-try percentage per quiz id. */
     best: Record<string, number>;
     onbuild: () => void;
+    onbrowse: () => void;
     onplay: (quiz: QuizSpec) => void;
     onedit: (quiz: QuizSpec) => void;
     ondelete: (quiz: QuizSpec) => void;
@@ -23,6 +24,7 @@
     quizzes,
     best,
     onbuild,
+    onbrowse,
     onplay,
     onedit,
     ondelete,
@@ -55,7 +57,10 @@
     </p>
   {/if}
 
-  <button class="build" onclick={onbuild}>+ Build a quiz</button>
+  <div class="start">
+    <button class="build" onclick={onbuild}>+ Build a quiz</button>
+    <button class="browse" onclick={onbrowse}>Browse shared quizzes</button>
+  </div>
 
   {#if quizzes.length > 0}
     <h2>Your quizzes</h2>
@@ -118,9 +123,22 @@
     font-size: 0.95rem;
   }
 
+  .start { display: flex; gap: 0.5rem; margin: 1.75rem 0 0; }
+  .browse {
+    padding: 0.85rem 1rem;
+    font: inherit;
+    color: #1d232b;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .browse:hover { border-color: var(--accent); }
+
   .build {
-    width: 100%;
-    margin: 1.75rem 0 0;
+    flex: 1;
+    margin: 0;
     padding: 0.85rem;
     font: inherit;
     font-weight: 650;
