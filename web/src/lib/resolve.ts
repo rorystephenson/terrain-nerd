@@ -15,11 +15,9 @@
  * So: try the id, then the wikidata entity, then the name and where it stands —
  * and say plainly what could not be found either way.
  */
+import { normalizeName } from './quiz.ts';
 import { haversineKm } from './thin.ts';
 import type { FeatureRef, KindId, QuizFeature } from './types.ts';
-
-/** Matches `createQuiz`: two spellings of one name are one name. */
-const normalizeName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
  * How far a feature is allowed to have moved and still be the same feature.

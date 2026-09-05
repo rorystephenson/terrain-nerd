@@ -60,7 +60,16 @@ function shuffle<T>(items: readonly T[], random: () => number): T[] {
   return out;
 }
 
-const normalizeName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, ' ');
+/**
+ * Two spellings of a name are one name.
+ *
+ * Exported because this rule decides what counts as a single question, and
+ * everything that counts questions — the builder's tally, a published quiz's
+ * headline number, the fallback that finds a feature whose id has moved — has
+ * to agree with the round itself about it. It had drifted into four copies.
+ */
+export const normalizeName = (name: string): string =>
+  name.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
  * Turns a zone's features into a round of questions.

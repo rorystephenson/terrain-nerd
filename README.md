@@ -217,6 +217,33 @@ both do the same thing with it: draw the name if the map's zoom is inside its
 range. Panning cannot change that answer, because nothing in it looks at where
 the viewport sits.
 
+## Sharing a quiz
+
+A quiz you build is yours and private. **Publishing freezes it** and gives it a
+link: `/q/<id>`, which anyone can open, play and keep, signed in or not.
+
+Frozen means frozen. Editing a published quiz afterwards changes nothing anyone
+else can see until you publish again, and publishing again writes version 2
+rather than overwriting version 1 — `/q/<id>?v=1` still returns exactly what was
+shared. That is what keeps a score attached to the question set it was earned
+against, and it is why the panel says a quiz has changed since it was published
+rather than quietly diverging from it.
+
+Publishing needs a real account; playing, building and keeping do not. An
+anonymous account is lost with the site data, and a published quiz whose author
+cannot be reached is worse than no publish button.
+
+**Popularity counts people, not rounds.** Finishing a quiz writes a marker
+document you can write once and can never delete, in the same commit as the
+increment it authorises — so replaying a quiz all afternoon moves the number not
+at all, and the number is provably distinct players rather than something a
+client asserts. The rules enforce that, not the app; `npm run test:rules` is
+where it is checked.
+
+Opening a link that no longer resolves lands on your own list saying so. The
+commonest reason is a quiz that has been unpublished, which is not the visitor's
+mistake and should not look like an error.
+
 ## Running it
 
 ```bash
@@ -747,7 +774,7 @@ tools/             dev tools, on their own Vite roots
   render/          draw the tile pyramid
   upload/          r2.mjs, and the two things that go in the bucket
   rules/           what the security rules actually allow
-  e2e/             signing in across two machines, against the emulator
+  e2e/             signing in, and sharing, against the emulator
 firestore.rules    what the client may do, enforced by the database
 firestore.indexes.json
 web/src/lib/
@@ -759,12 +786,14 @@ web/src/lib/
   quiz.ts          quiz state machine                   (pure)
   resolve.ts       finding features whose ids moved      (pure)
   heal.ts          what an old quiz learns by playing    (pure)
+  route.ts         where the app is, as a URL            (pure)
   codec.ts         quizzes to and from Firestore         (pure)
   library.ts       reconciling this browser with the account (pure)
   session.svelte.ts where quizzes and scores come from
   cloud.ts         the only module that imports Firebase
   firebase.ts      the project config, which is not a secret
   Account.svelte   signing in, and the one offer to do so
+  Share.svelte     publishing a quiz, and the link it gets
   labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid        (pure)
   thin.ts          one voice per cluster                (pure)
@@ -780,10 +809,11 @@ unit-tested — including six that live in the pipeline (`placeZoom.ts`,
 from here because this is where the test runner is:
 
 ```bash
-npm test             # 247 tests
+npm test             # 264 tests
 npm run typecheck    # pipeline, web and the tools
-npm run test:rules   # 22 rules tests, against the Firestore emulator (needs Java)
+npm run test:rules   # 25 rules tests, against the Firestore emulator (needs Java)
 npm run test:e2e     # signing in across two machines (needs the emulator + a dev server)
+npm run test:share   # publishing and opening a link  (likewise)
 ```
 
 ## Known gaps

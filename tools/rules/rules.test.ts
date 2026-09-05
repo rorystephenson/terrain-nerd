@@ -245,3 +245,31 @@ describe('profiles', () => {
     await assertFails(setDoc(doc(named('alice'), 'users/alice'), { displayName: 'x'.repeat(41) }));
   });
 });
+
+describe('frozen versions', () => {
+  /** Publishing: the quiz and its first snapshot, in one transaction. */
+  const publishV1 = (db: ReturnType<typeof named>, uid: string) => {
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'published/q1'), publishedBody(uid));
+    batch.set(doc(db, 'published/q1/versions/1'), { ...quizBody(), version: 1 });
+    return batch.commit();
+  };
+
+  test('the first version is written alongside the quiz it belongs to', async () => {
+    // The rule has to see the quiz as it *will* be, not as it is: at this
+    // moment `published/q1` does not exist yet.
+    await assertSucceeds(publishV1(named('alice'), 'alice'));
+  });
+
+  test('a snapshot cannot be written for somebody else’s quiz', async () => {
+    await assertSucceeds(publishV1(named('alice'), 'alice'));
+    await assertFails(setDoc(doc(named('mallory'), 'published/q1/versions/2'), { version: 2 }));
+  });
+
+  test('a published version is world-readable and never changes again', async () => {
+    await assertSucceeds(publishV1(named('alice'), 'alice'));
+    await assertSucceeds(getDoc(doc(env.unauthenticatedContext().firestore(), 'published/q1/versions/1')));
+    await assertFails(setDoc(doc(named('alice'), 'published/q1/versions/1'), { version: 1, name: 'Rewritten' }));
+    await assertFails(deleteDoc(doc(named('alice'), 'published/q1/versions/1')));
+  });
+});

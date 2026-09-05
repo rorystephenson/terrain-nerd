@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { docToSpec, hasUndefined, readRef, specToDoc, MAX_FEATURES } from './codec.ts';
+import {
+  CELL_ZOOM,
+  docToPublished,
+  docToSpec,
+  hasUndefined,
+  readRef,
+  specToDoc,
+  specToPublished,
+  MAX_FEATURES,
+} from './codec.ts';
 import type { QuizSpec } from './types.ts';
 
 const spec = (over: Partial<QuizSpec> = {}): QuizSpec => ({
@@ -107,4 +116,74 @@ test('ownership and timestamps come from the caller, not the quiz', () => {
   assert.equal(doc.ownerId, 'u7');
   assert.equal(doc.updatedAt, '2026-09-05T10:00:00.000Z');
   assert.equal(doc.createdAt, '2026-01-01T00:00:00.000Z', 'created is the quiz’s own');
+});
+
+test('publishing keeps what a round needs and drops what only the builder wanted', () => {
+  const draft = spec({
+    poolAt: '2026-08-01',
+    builder: { kinds: { peak: true }, ranges: {}, overrides: { 'peak/n1': 'in' } },
+    features: [
+      { id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] },
+      { id: 'valley/w2', kind: 'valley', name: 'Val Rendena', at: [10.75, 46.1] },
+    ],
+  });
+  const doc = specToPublished(draft, { id: 'u1', name: 'Rory' }, 1, '2026-09-05T00:00:00.000Z');
+
+  assert.equal('builder' in doc, false, 'editing state is not published');
+  assert.equal(doc.poolAt, '2026-08-01', 'which pool build the ids were true of');
+  assert.equal(doc.ownerName, 'Rory');
+  assert.equal(doc.version, 1);
+  assert.equal(doc.players, 0);
+  assert.equal(doc.hidden, false);
+  assert.deepEqual(doc.counts, { valley: 1, peak: 1, pass: 0, questions: 2 });
+  assert.deepEqual([...doc.kinds].sort(), ['peak', 'valley']);
+  assert.equal(hasUndefined(doc), false);
+});
+
+test('the headline count is questions, not features', () => {
+  // Two features sharing a name are one question, and the score is a
+  // percentage of questions — so a quiz must not advertise the other number.
+  const draft = spec({
+    features: [
+      { id: 'valley/w1', kind: 'valley', name: 'Valsorda', at: [10.7, 46.1] },
+      { id: 'valley/w2', kind: 'valley', name: 'valsorda ', at: [11.6, 46.1] },
+      { id: 'peak/n3', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] },
+    ],
+  });
+  const doc = specToPublished(draft, { id: 'u1', name: 'Rory' }, 1, 'now');
+  assert.equal(doc.features.length, 3);
+  assert.equal(doc.counts.questions, 2);
+});
+
+test('a published quiz carries the cells it sits in, for finding it by ground', () => {
+  const doc = specToPublished(spec(), { id: 'u1', name: 'Rory' }, 1, 'now');
+  assert.equal(doc.cellZoom, CELL_ZOOM);
+  assert.ok(doc.cells.length > 0 && doc.cells.length <= 24);
+  assert.ok(doc.cells.every((c) => /^x\d+y\d+$/.test(c)), 'the pool’s own cell key shape');
+});
+
+test('a published document round-trips into something playable', () => {
+  const draft = spec({ name: 'Brenta' });
+  const doc = specToPublished(draft, { id: 'u1', name: 'Rory' }, 3, '2026-09-05T00:00:00.000Z');
+  const back = docToPublished('q1', doc);
+
+  assert.equal(back?.ownerName, 'Rory');
+  assert.equal(back?.version, 3);
+  assert.equal(back?.spec.name, 'Brenta');
+  assert.deepEqual(back?.spec.features, draft.features);
+});
+
+test('a published document that is not a quiz is refused', () => {
+  assert.equal(docToPublished('q1', { ownerName: 'Rory', version: 1 }), null);
+  assert.equal(docToPublished('q1', null), null);
+});
+
+test('missing or nonsense metadata falls back rather than failing the quiz', () => {
+  // Someone else wrote this document and no rule has looked inside `features`.
+  const doc = { ...specToPublished(spec(), { id: 'u1', name: 'Rory' }, 1, 'now') };
+  const back = docToPublished('q1', { ...doc, version: -5, players: 'lots', counts: 'nope', ownerName: 42 });
+  assert.equal(back?.version, 1);
+  assert.equal(back?.players, 0);
+  assert.equal(back?.ownerName, '');
+  assert.equal(back?.questions, 1, 'recomputed from the features it does have');
 });

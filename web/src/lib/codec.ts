@@ -18,6 +18,8 @@
  * which is what makes it testable under `node --test` alongside everything else
  * in `lib`.
  */
+import { questionsIn } from './builder.ts';
+import { cellsCovering } from './grid.ts';
 import type { BuilderState, FeatureRef, KindId, QuizSpec } from './types.ts';
 
 /** Firestore rejects a document over 1 MiB; this keeps us far under it. */
@@ -31,7 +33,7 @@ export type QuizDoc = {
   schema: 1;
   ownerId: string;
   name: string;
-  source: 'built' | 'starter';
+  source: QuizSpec['source'];
   createdAt: string;
   updatedAt: string;
   features: FeatureRef[];
@@ -111,7 +113,10 @@ export function docToSpec(id: string, value: unknown): QuizSpec | null {
   return {
     id,
     name: raw.name.slice(0, MAX_NAME),
-    source: raw.source === 'starter' ? 'starter' : 'built',
+    source:
+      raw.source === 'starter' || raw.source === 'shared'
+        ? (raw.source as QuizSpec['source'])
+        : 'built',
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date(0).toISOString(),
     features,
     bbox: raw.bbox,
@@ -163,4 +168,133 @@ export function hasUndefined(value: unknown): boolean {
     return Object.values(value).some(hasUndefined);
   }
   return false;
+}
+
+
+/**
+ * The zoom the discovery grid is cut at.
+ *
+ * Reuses `cellsCovering` from `grid.ts` — the same web-mercator arithmetic the
+ * pool is already chunked with, and already pinned against the pipeline's copy
+ * by `grid.test.ts`. So "quizzes near this ground" needs no geohash library and
+ * no second coordinate system: a quiz stores the cells its bbox touches, and a
+ * viewport asks for the cells it touches.
+ *
+ * z7 is roughly 200 km at Alpine latitudes. A quiz touches one or two; a
+ * viewport rarely more than a handful, which matters because Firestore's
+ * `array-contains-any` takes at most thirty values. z9, the pool's own chunk
+ * zoom, would be far too fine for that — a wide viewport would blow the limit.
+ */
+export const CELL_ZOOM = 7;
+
+/** A quiz's own count of cells is capped: a pathological bbox must not blow the doc up. */
+const MAX_CELLS = 24;
+
+/** What the world sees at `published/{quizId}`. */
+export type PublishedDoc = {
+  schema: 1;
+  ownerId: string;
+  /** Denormalised, so playing a shared quiz needs no second read for a byline. */
+  ownerName: string;
+  name: string;
+  version: number;
+  publishedAt: string;
+  features: FeatureRef[];
+  bbox: [number, number, number, number];
+  kinds: KindId[];
+  counts: { valley: number; peak: number; pass: number; questions: number };
+  cells: string[];
+  cellZoom: number;
+  players: number;
+  hidden: boolean;
+  poolAt?: string;
+};
+
+/** A published quiz, as the app holds it: the spec plus who and when. */
+export type Published = {
+  spec: QuizSpec;
+  ownerId: string;
+  ownerName: string;
+  version: number;
+  publishedAt: string;
+  questions: number;
+  players: number;
+};
+
+/**
+ * A draft, frozen.
+ *
+ * `builder` is deliberately left behind. It is editing state, it is the largest
+ * field in the document, and publishing it would invite an expectation of
+ * remixing that has not been designed. What ships is what a round needs and
+ * what a list needs to describe it.
+ */
+export function specToPublished(
+  spec: QuizSpec,
+  owner: { id: string; name: string },
+  version: number,
+  now: string,
+): PublishedDoc {
+  const features = spec.features.slice(0, MAX_FEATURES).map((ref) => ({
+    id: ref.id,
+    kind: ref.kind,
+    ...(ref.name !== undefined ? { name: ref.name } : {}),
+    ...(ref.at !== undefined ? { at: ref.at } : {}),
+    ...(ref.wikidata !== undefined ? { wikidata: ref.wikidata } : {}),
+  }));
+
+  const counts = { valley: 0, peak: 0, pass: 0 };
+  for (const ref of features) counts[ref.kind] += 1;
+
+  return {
+    schema: 1,
+    ownerId: owner.id,
+    ownerName: owner.name.slice(0, 40),
+    name: spec.name.slice(0, MAX_NAME),
+    version,
+    publishedAt: now,
+    features,
+    bbox: spec.bbox,
+    kinds: [...new Set(features.map((ref) => ref.kind))],
+    counts: {
+      ...counts,
+      // Not `features.length`: two features sharing a name are one question,
+      // and the score is a percentage of questions.
+      questions: questionsIn(features.map((ref) => ref.name ?? ref.id)),
+    },
+    cells: cellsCovering(spec.bbox, CELL_ZOOM).slice(0, MAX_CELLS),
+    cellZoom: CELL_ZOOM,
+    players: 0,
+    hidden: false,
+    ...(spec.poolAt !== undefined ? { poolAt: spec.poolAt } : {}),
+  };
+}
+
+/**
+ * A published document as something playable, or `null`.
+ *
+ * The most suspicious boundary in the app: this document was written by someone
+ * else, and the rules cannot loop, so nothing server-side has looked at a single
+ * element of `features`.
+ */
+export function docToPublished(id: string, value: unknown): Published | null {
+  const spec = docToSpec(id, value);
+  if (!spec) return null;
+  const raw = value as Record<string, unknown>;
+
+  const counts = raw.counts as { questions?: unknown } | undefined;
+  const questions =
+    typeof counts?.questions === 'number' && Number.isFinite(counts.questions)
+      ? counts.questions
+      : questionsIn(spec.features.map((ref) => ref.name ?? ref.id));
+
+  return {
+    spec,
+    ownerId: typeof raw.ownerId === 'string' ? raw.ownerId : '',
+    ownerName: typeof raw.ownerName === 'string' ? raw.ownerName.slice(0, 40) : '',
+    version: typeof raw.version === 'number' && raw.version > 0 ? Math.floor(raw.version) : 1,
+    publishedAt: typeof raw.publishedAt === 'string' ? raw.publishedAt : '',
+    questions,
+    players: typeof raw.players === 'number' && raw.players >= 0 ? Math.floor(raw.players) : 0,
+  };
 }

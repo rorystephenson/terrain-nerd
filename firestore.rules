@@ -113,8 +113,12 @@ service cloud.firestore {
 
       match /versions/{version} {
         allow get, list: if true;
+        // `getAfter`, not `get`: the first version is written in the same
+        // transaction that creates the quiz it belongs to, so at the moment
+        // this is evaluated `get` would be reading a document that does not
+        // exist yet and the very first publish would be refused.
         allow create: if signedIn()
-          && get(/databases/$(database)/documents/published/$(quizId)).data.ownerId == request.auth.uid;
+          && getAfter(/databases/$(database)/documents/published/$(quizId)).data.ownerId == request.auth.uid;
         allow update, delete: if false;
       }
     }

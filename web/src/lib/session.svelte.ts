@@ -291,6 +291,43 @@ class Session {
     this.offering = false;
   }
 
+  /** Freezes a quiz into its public form. Returns the version it became. */
+  async publish(spec: QuizSpec): Promise<number> {
+    if (!this.#cloud) throw new Error('Not connected.');
+    return this.#cloud.publish(spec);
+  }
+
+  async unpublish(quizId: string): Promise<void> {
+    await this.#cloud?.unpublish(quizId);
+  }
+
+  /** What a quiz's public face looks like right now, or nothing if it has none. */
+  async published(quizId: string) {
+    return (await this.#cloud?.publishedState(quizId)) ?? null;
+  }
+
+  /**
+   * Counts a finished round of a published quiz towards its popularity.
+   *
+   * Deliberately keyed on the quiz rather than the round: this can be called
+   * after every replay and will only ever count once.
+   */
+  countPlay(quizId: string): void {
+    void this.#cloud?.recordPlay(quizId).catch(() => {});
+  }
+
+  /**
+   * Keeps someone else's quiz among your own.
+   *
+   * The id is deliberately unchanged, so your best score on it stays the score
+   * on *that* quiz and remains comparable with everyone else's. It is marked
+   * `shared` because it is not yours to publish — and the rules would refuse
+   * that anyway, since the published copy already names an owner.
+   */
+  keep(shared: QuizSpec): void {
+    this.save({ ...shared, source: 'shared' });
+  }
+
   async signOut(): Promise<void> {
     if (!this.#cloud) return;
     this.#detach();

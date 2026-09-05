@@ -29,17 +29,22 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
+  increment,
   initializeFirestore,
   memoryLocalCache,
   onSnapshot,
   persistentLocalCache,
   persistentMultipleTabManager,
+  runTransaction,
+  serverTimestamp,
   setDoc,
+  writeBatch,
   type Firestore,
 } from 'firebase/firestore';
 
-import { docToSpec, specToDoc } from './codec.ts';
+import { docToPublished, docToSpec, specToDoc, specToPublished, type Published } from './codec.ts';
 import { firebaseConfig, useEmulator } from './firebase.ts';
 import type { QuizSpec } from './types.ts';
 
@@ -292,4 +297,120 @@ export async function leave(): Promise<void> {
   const { auth } = connect();
   await signOut(auth);
   await signInAnonymously(auth).catch(() => {});
+}
+
+
+/**
+ * The display name a published quiz is signed with.
+ *
+ * Taken from the provider rather than from a profile document, so publishing
+ * needs no extra read and a quiz stays readable even if the author's profile
+ * is later removed. The profile is written too, because a name that only
+ * exists inside published copies cannot be corrected later.
+ */
+function nameOf(user: User): string {
+  return (user.displayName ?? user.email?.split('@')[0] ?? 'Anonymous').slice(0, 40);
+}
+
+export function saveProfile(): void {
+  const { auth, db } = connect();
+  const user = auth.currentUser;
+  if (!user || user.isAnonymous) return;
+  void setDoc(
+    doc(db, 'users', user.uid),
+    { displayName: nameOf(user), updatedAt: new Date().toISOString() },
+    { merge: true },
+  ).catch(failed);
+}
+
+/**
+ * Freezes a draft into its public form, and returns the version it became.
+ *
+ * A transaction, because the version number is derived from what is already
+ * published and two devices publishing at once must not both decide they are
+ * version 3. The snapshot under `versions/` is written in the same commit — it
+ * is what makes a `?v=` link mean exactly what was shared, even after the
+ * author has moved on.
+ *
+ * `players` and `hidden` are carried across rather than reset, both because the
+ * rules require it and because a republish should not wipe the record of who
+ * has played. Republishing is an edit to a quiz, not a new quiz.
+ */
+export async function publish(spec: QuizSpec): Promise<number> {
+  const { auth, db } = connect();
+  const user = auth.currentUser;
+  if (!user || user.isAnonymous) throw new Error('Publishing needs an account.');
+
+  const owner = { id: user.uid, name: nameOf(user) };
+  const ref = doc(db, 'published', spec.id);
+
+  const version = await runTransaction(db, async (tx) => {
+    const current = await tx.get(ref);
+    const previous = current.exists() ? current.data() : null;
+    const next = previous ? Number(previous.version ?? 0) + 1 : 1;
+
+    const body = specToPublished(spec, owner, next, new Date().toISOString());
+    tx.set(ref, previous ? { ...body, players: previous.players, hidden: previous.hidden } : body);
+    tx.set(doc(db, 'published', spec.id, 'versions', String(next)), body);
+    return next;
+  });
+
+  saveProfile();
+  return version;
+}
+
+/** Takes a quiz out of circulation. Existing links stop resolving; drafts are untouched. */
+export async function unpublish(quizId: string): Promise<void> {
+  const { db } = connect();
+  await deleteDoc(doc(db, 'published', quizId));
+}
+
+/** A published quiz by id, or an exact frozen version of it. */
+export async function getPublished(quizId: string, version?: number): Promise<Published | null> {
+  const { db } = connect();
+  const ref =
+    version === undefined
+      ? doc(db, 'published', quizId)
+      : doc(db, 'published', quizId, 'versions', String(version));
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const published = docToPublished(quizId, snap.data());
+  return published?.spec.features.length ? published : null;
+}
+
+/** What the author needs to know about their own quiz's public face. */
+export async function publishedState(quizId: string): Promise<Published | null> {
+  return getPublished(quizId);
+}
+
+/**
+ * Counts this player, once, for as long as the quiz exists.
+ *
+ * The marker and the increment go up in one commit because that is the only
+ * shape the rules will accept: `players` may move by one, and only alongside
+ * the creation of a document this uid can create once and can never delete. So
+ * the number is distinct people who finished a round, not rounds — replaying
+ * a quiz all afternoon moves it not at all.
+ *
+ * Checked first rather than attempted and caught, because a second attempt is
+ * the ordinary case — most rounds are replays — and a denied write is not
+ * something to report to somebody who has just finished a quiz.
+ */
+export async function recordPlay(quizId: string): Promise<void> {
+  const { auth, db } = connect();
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const marker = doc(db, 'published', quizId, 'players', user.uid);
+  const already = await getDoc(marker).catch(() => null);
+  if (!already || already.exists()) return;
+
+  const batch = writeBatch(db);
+  batch.set(marker, { at: serverTimestamp() });
+  batch.update(doc(db, 'published', quizId), { players: increment(1) });
+  await batch.commit().catch(() => {
+    // A race with another tab, or the quiz was unpublished mid-round. The
+    // counter is only ever an approximation of counting the markers, so
+    // losing one is not worth telling anybody about.
+  });
 }

@@ -155,7 +155,12 @@ export type FeatureRef = {
 export type QuizSpec = {
   id: string;
   name: string;
-  source: 'built' | 'starter';
+  /**
+   * Where the quiz came from. `shared` means it was kept from someone else's
+   * link — it plays like any other, but it is not yours to publish, and the
+   * rules would refuse it anyway.
+   */
+  source: 'built' | 'starter' | 'shared';
   createdAt: string;
   /** Resolved at save time, so replaying always asks the same set. */
   features: FeatureRef[];

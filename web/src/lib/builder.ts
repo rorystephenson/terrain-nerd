@@ -2,6 +2,7 @@
  * The rules behind the quiz builder — deliberately free of MapLibre and DOM
  * references, the same way `quiz.ts` is, so all of it is directly testable.
  */
+import { normalizeName } from './quiz.ts';
 import { thin } from './thin.ts';
 import type {
   BuilderState,
@@ -295,9 +296,12 @@ function space(admitted: readonly QuizFeature[], state: BuilderState): QuizFeatu
  * applies when it builds the round.
  */
 export function questionCount(features: readonly QuizFeature[]): number {
-  return new Set(features.map((f) => f.properties.name.trim().toLowerCase().replace(/\s+/g, ' ')))
-    .size;
+  return questionsIn(features.map((f) => f.properties.name));
 }
+
+/** The same count, from names alone — all a published quiz has to hand. */
+export const questionsIn = (names: readonly string[]): number =>
+  new Set(names.map(normalizeName)).size;
 
 /** Pads a bbox by a fraction of its own size, with a floor for tiny selections. */
 export function padBox(

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Builder from './lib/Builder.svelte';
   import Confirm from './lib/Confirm.svelte';
   import MapView from './lib/MapView.svelte';
@@ -13,6 +14,8 @@
   import { useCoverage } from './lib/tiles.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
   import { session } from './lib/session.svelte.ts';
+  import { parseRoute, routeUrl, type Route } from './lib/route.ts';
+  import type { Published } from './lib/codec.ts';
   import { hasSeen, markSeen } from './lib/storage.ts';
   import {
     attempt,
@@ -44,11 +47,14 @@
   type Screen =
     | { at: 'list' }
     | { at: 'build'; editing: QuizSpec | null }
-    | { at: 'play'; spec: QuizSpec };
+    /** `shared` is set when this quiz came from a link rather than from here. */
+    | { at: 'play'; spec: QuizSpec; shared: Published | null };
 
   let index = $state.raw<PoolIndex | null>(null);
   let loadError = $state<string | null>(null);
   let screen = $state<Screen>({ at: 'list' });
+  /** Said once when a link points at a quiz that is not there any more. */
+  let missingQuiz = $state(false);
 
   const quizzes = $derived(session.quizzes);
   const best = $derived(session.best);
@@ -79,8 +85,26 @@
   };
   const later = (fn: () => void, ms: number) => timers.push(setTimeout(fn, ms));
 
+  /*
+   * Start-up, once.
+   *
+   * `untrack` because this is a bootstrap and not a reaction: `session.init()`
+   * writes `session.quizzes` and `goTo` reads it, so tracked, the effect
+   * depended on the very state it had just set and re-ran itself until Svelte
+   * stopped it — taking a second `session.init()`, and a second set of
+   * listeners, round with it every time. Nothing in here should re-run when
+   * anything changes; that is what the other effects are for.
+   */
   $effect(() => {
-    session.init();
+    const onPop = () => void goTo(parseRoute(location.href));
+    untrack(() => {
+      session.init();
+      // The address the app was opened at decides the first screen. Resolving
+      // a shared quiz needs the network, so it runs alongside the pool load
+      // rather than in front of it.
+      void goTo(parseRoute(location.href));
+    });
+    addEventListener('popstate', onPop);
     loadIndex()
       .then((loaded) => {
         // Before anything draws: the tile protocol needs it to tell an
@@ -93,6 +117,7 @@
       });
     return () => {
       clearTimers();
+      removeEventListener('popstate', onPop);
       session.dispose();
     };
   });
@@ -116,8 +141,15 @@
         // The pool has just handed us names and anchors for everything this
         // quiz refers to, so a quiz saved before it carried them can be filled
         // in now. Playing an old quiz is what repairs it — see `migrateSpec`.
+        //
+        // Only ever a quiz that is already yours. Someone else's, opened from a
+        // link, resolves against the same pool and so "heals" just as readily —
+        // and saving that would put it in your list the moment you looked at
+        // it, which is precisely what the offer to keep it exists to ask.
         const healed = healSpec(spec, resolved);
-        if (healed !== spec) session.save(healed);
+        if (healed !== spec && quizzes.some((quiz) => quiz.id === spec.id)) {
+          session.save(healed);
+        }
       })
       .catch((error: unknown) => {
         if (!cancelled) loadError = error instanceof Error ? error.message : String(error);
@@ -225,6 +257,9 @@
   $effect(() => {
     if (finished && screen.at === 'play' && quiz) {
       session.recordScore(screen.spec.id, score(quiz).pct);
+      // Popularity counts people, not rounds — `countPlay` is safe to call on
+      // every replay and will only ever land once.
+      if (screen.shared) session.countPlay(screen.spec.id);
     }
   });
 
@@ -236,6 +271,22 @@
    * mechanism the builder's explainers use — see `hasSeen` — so it can never
    * become a thing you dismiss twice.
    */
+  /** Who made the quiz on screen, when it came from a link rather than from here. */
+  const sharedFrom = $derived(
+    screen.at === 'play' ? (screen.shared?.ownerName || null) : null,
+  );
+  // Bound to a local first: `screen` is mutable state, so the narrowing does
+  // not survive into a callback that reads it again.
+  const canKeep = $derived.by(() => {
+    const current = screen;
+    if (current.at !== 'play' || !current.shared) return false;
+    return !quizzes.some((quiz) => quiz.id === current.spec.id);
+  });
+  function keepShared() {
+    const current = screen;
+    if (current.at === 'play') session.keep(current.spec);
+  }
+
   const NUDGE = 'signin';
   let nudge = $state(false);
   $effect(() => {
@@ -244,7 +295,7 @@
     markSeen(NUDGE);
   });
 
-  function play(spec: QuizSpec) {
+  function play(spec: QuizSpec, shared: Published | null = null) {
     nudge = false;
     clearTimers();
     feedback = null;
@@ -253,7 +304,7 @@
     confirmingQuit = false;
     quiz = null;
     features = [];
-    screen = { at: 'play', spec };
+    show({ at: 'play', spec, shared });
   }
 
   function replay() {
@@ -266,6 +317,59 @@
     quiz = createQuiz(features);
   }
 
+  /**
+   * The address bar and the screen, kept in step.
+   *
+   * `pushState` on every navigation, `popstate` back the other way — which also
+   * makes the browser's back button work, something it never did. Playing your
+   * own unpublished quiz gets an address too: it is only a link other people
+   * can follow once the quiz is published, but it is the same screen either way
+   * and a reload should land back on it.
+   */
+  const routeOf = (current: Screen): Route => {
+    if (current.at === 'list') return { at: 'list' };
+    if (current.at === 'build') return { at: 'build', quizId: current.editing?.id ?? null };
+    return { at: 'quiz', quizId: current.spec.id, version: current.shared?.version };
+  };
+
+  function show(next: Screen, push = true) {
+    screen = next;
+    if (!push) return;
+    const url = routeUrl(routeOf(next));
+    if (url !== location.pathname + location.search) history.pushState(null, '', url);
+  }
+
+  /**
+   * Turns an address into a screen.
+   *
+   * A quiz id is looked for here first and in the published collection second,
+   * so your own quizzes open instantly and offline, and a stranger's link
+   * still resolves. A link that resolves to nothing lands on the list saying
+   * so, rather than on an error: the commonest reason is a quiz that has been
+   * unpublished, and that is not the visitor's mistake.
+   */
+  async function goTo(route: Route) {
+    missingQuiz = false;
+    if (route.at === 'list') return show({ at: 'list' }, false);
+    if (route.at === 'build') {
+      const editing = route.quizId ? (session.quizzes.find((q) => q.id === route.quizId) ?? null) : null;
+      return show({ at: 'build', editing }, false);
+    }
+
+    if (route.version === undefined) {
+      const mine = session.quizzes.find((q) => q.id === route.quizId);
+      if (mine) return show({ at: 'play', spec: mine, shared: null }, false);
+    }
+
+    const cloud = await import('./lib/cloud.ts').catch(() => null);
+    const published = await cloud?.getPublished(route.quizId, route.version).catch(() => null);
+    if (!published) {
+      missingQuiz = true;
+      return show({ at: 'list' }, false);
+    }
+    show({ at: 'play', spec: published.spec, shared: published }, false);
+  }
+
   function toList() {
     clearTimers();
     feedback = null;
@@ -273,7 +377,7 @@
     collapsed = false;
     confirmingQuit = false;
     quiz = null;
-    screen = { at: 'list' };
+    show({ at: 'list' });
   }
 
   /** Back, via the dialog when there is a part-finished round behind it. */
@@ -414,6 +518,8 @@
           pct={tally.pct}
           {gone}
           {nudge}
+          author={sharedFrom}
+          onkeep={canKeep ? keepShared : null}
           {collapsed}
           ontoggle={() => (collapsed = !collapsed)}
           onreplay={replay}
@@ -443,9 +549,10 @@
       {index}
       {quizzes}
       {best}
-      onbuild={() => (screen = { at: 'build', editing: null })}
+      missing={missingQuiz}
+      onbuild={() => show({ at: 'build', editing: null })}
       onplay={play}
-      onedit={(spec) => (screen = { at: 'build', editing: spec })}
+      onedit={(spec) => show({ at: 'build', editing: spec })}
       ondelete={onDelete}
       onimport={onImport}
     />

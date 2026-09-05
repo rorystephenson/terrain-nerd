@@ -23,6 +23,10 @@
     gone: string[];
     /** Show the one-time offer to sign in. Decided by `App.svelte`, shown once ever. */
     nudge: boolean;
+    /** Who made this quiz, when it arrived from a link rather than from here. */
+    author: string | null;
+    /** Offered when a shared quiz is not among your own yet. */
+    onkeep: (() => void) | null;
     /** Folded away so the finished map can be studied. */
     collapsed: boolean;
     ontoggle: () => void;
@@ -41,6 +45,8 @@
     onmenu,
     gone,
     nudge,
+    author,
+    onkeep,
     collapsed,
     ontoggle,
     nameOf,
@@ -87,6 +93,17 @@
           {gone.length === 1 ? '1 feature is' : `${gone.length} features are`} no longer in the
           map data, so {gone.length === 1 ? 'it was' : 'they were'} not asked:
           {gone.join(', ')}.
+        </p>
+      {/if}
+
+      {#if author}
+        <p class="from">
+          A quiz by {author}.
+          {#if onkeep}
+            <button class="keep" onclick={onkeep}>Keep it among mine</button>
+          {:else}
+            <span class="kept">Kept among yours.</span>
+          {/if}
         </p>
       {/if}
 
@@ -220,6 +237,29 @@
     background: rgba(0, 0, 0, 0.04);
     border-radius: 7px;
   }
+
+  .from {
+    margin: 0.6rem 0 0;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--muted);
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 7px;
+  }
+  .keep {
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 650;
+    color: var(--accent);
+    background: none;
+    border: 0;
+    padding: 0;
+    margin-left: 0.3rem;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .kept { margin-left: 0.3rem; }
 
   .review {
     list-style: none;

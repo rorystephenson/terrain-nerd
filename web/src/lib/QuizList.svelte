@@ -1,5 +1,6 @@
 <script lang="ts">
   import Account from './Account.svelte';
+  import Share from './Share.svelte';
   import { makeQuizFile, mergeQuizFile, quizFilename, readQuizFile } from './storage.ts';
   import type { PoolIndex, QuizSpec } from './types.ts';
 
@@ -13,9 +14,15 @@
     onedit: (quiz: QuizSpec) => void;
     ondelete: (quiz: QuizSpec) => void;
     onimport: (quizzes: QuizSpec[]) => void;
+    /** A link pointed at a quiz that is not there any more. */
+    missing: boolean;
   };
 
-  let { index, quizzes, best, onbuild, onplay, onedit, ondelete, onimport }: Props = $props();
+  let { index, quizzes, best, onbuild, onplay, onedit, ondelete, onimport, missing }: Props =
+    $props();
+
+  /** Which quiz has its share panel open, if any. */
+  let sharing = $state<string | null>(null);
 
   const total = $derived(index.kinds.reduce((sum, kind) => sum + kind.count, 0));
 
@@ -76,6 +83,13 @@
     <Account />
   </header>
 
+  {#if missing}
+    <p class="missing">
+      That link does not lead anywhere any more — the quiz may have been unpublished. Everything
+      below is still yours.
+    </p>
+  {/if}
+
   <button class="build" onclick={onbuild}>+ Build a quiz</button>
 
   {#if quizzes.length > 0}
@@ -86,16 +100,26 @@
           <button class="row" onclick={() => onplay(quiz)}>
             <span class="name">{quiz.name}</span>
             <span class="meta">
+              {#if quiz.source === 'shared'}<span class="tag">shared</span>{/if}
               {#if best[quiz.id] !== undefined}
                 <span class="best" class:perfect={best[quiz.id] === 100}>{best[quiz.id]}%</span>
               {/if}
               <span class="count">{quiz.features.length}</span>
             </span>
           </button>
+          <button
+            class="icon"
+            class:on={sharing === quiz.id}
+            title="Share"
+            aria-label="Share {quiz.name}"
+            onclick={() => (sharing = sharing === quiz.id ? null : quiz.id)}>⇪</button>
           <button class="icon" title="Save to file" aria-label="Save {quiz.name} to file" onclick={() => exportOne(quiz)}>↓</button>
           <button class="icon" title="Edit" aria-label="Edit {quiz.name}" onclick={() => onedit(quiz)}>✎</button>
           <button class="icon" title="Delete" aria-label="Delete {quiz.name}" onclick={() => ondelete(quiz)}>×</button>
         </li>
+        {#if sharing === quiz.id}
+          <li class="panel"><Share {quiz} onclose={() => (sharing = null)} /></li>
+        {/if}
       {/each}
     </ul>
   {:else}
@@ -176,6 +200,16 @@
 
   .quizzes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
   .quizzes li { display: flex; gap: 0.3rem; }
+  .quizzes li.panel { display: block; }
+  .tag {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--muted); padding: 0.12rem 0.4rem;
+    background: rgba(0, 0, 0, 0.06); border-radius: 20px;
+  }
+  .missing {
+    margin: 1rem 0 0; padding: 0.7rem 0.85rem; font-size: 0.85rem; line-height: 1.5;
+    color: var(--muted); background: rgba(0, 0, 0, 0.04); border-radius: 9px;
+  }
   .row {
     flex: 1;
     display: flex;
@@ -216,6 +250,7 @@
     cursor: pointer;
   }
   .icon:hover { color: #1d232b; border-color: rgba(0, 0, 0, 0.25); }
+  .icon.on { color: #fff; background: var(--accent); border-color: var(--accent); }
 
   .empty {
     margin: 1.5rem 0 0;
