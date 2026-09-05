@@ -416,11 +416,6 @@
     session.remove(spec.id);
   }
 
-  // Scores are untouched by an import: the file never carried any.
-  function onImport(imported: QuizSpec[]) {
-    session.replace(imported);
-  }
-
   /**
    * "Show me" — the player is stuck and wants the answer.
    *
@@ -576,7 +571,6 @@
       onplay={play}
       onedit={(spec) => show({ at: 'build', editing: spec })}
       ondelete={onDelete}
-      onimport={onImport}
     />
   {/if}
 </main>

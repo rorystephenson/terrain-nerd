@@ -56,11 +56,16 @@ the map and on a phone the panel covers most of it. The pill keeps the question
 count, which is the number you minimised to watch: every pin moves it, and a
 fold that hid the count would only be unfolded again after each tap.
 
-Quizzes save to `localStorage` and can be replayed and edited. Nothing is synced
-anywhere, so each quiz has a **save to file** button and there is a matching
-load. A file holds the quiz itself and never your scores — those belong to the
-browser that earned them. Loading merges rather than overwrites, so a file
-dropped onto a browser that already has quizzes cannot destroy them.
+Quizzes can be replayed and edited, and they follow you: everyone gets an
+account on first load, so a quiz reaches the cloud before anybody has decided
+whether they want one. `localStorage` is still written as a mirror, so a browser
+that opens offline has them.
+
+There was a **save to file** button here once, and a matching load, because
+`localStorage` was all there was and clearing site data lost everything. Both
+are gone — a quiz that syncs and a link you can send are what the file was
+standing in for, and doing it twice would mean two ways to move a quiz and two
+sets of merge rules to keep in agreement.
 
 ### Two scores, kept apart
 
@@ -811,7 +816,7 @@ web/src/lib/
   thin.ts          one voice per cluster                (pure)
   tiles.ts         the tn:// protocol and coverage
   chunks.ts        cell loading and caching
-  storage.ts       localStorage
+  storage.ts       localStorage, and the migration off older saves
   MapView.svelte   MapLibre, both play and build modes
 ```
 

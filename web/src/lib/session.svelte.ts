@@ -218,15 +218,6 @@ class Session {
     if (this.account && this.#cloud) this.#cloud.dropQuiz(this.account.uid, id);
   }
 
-  /** A merged import, or any bulk replacement of the list. */
-  replace(quizzes: QuizSpec[]): void {
-    saveLocalAll(quizzes);
-    this.quizzes = quizzes;
-    if (this.account && this.#cloud) {
-      for (const spec of quizzes) this.#cloud.putQuiz(this.account.uid, spec);
-    }
-  }
-
   /** Records a round, if it beat what was already there. Never awaited. */
   recordScore(quizId: string, pct: number): void {
     const before = this.best[quizId];

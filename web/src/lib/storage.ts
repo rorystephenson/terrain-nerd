@@ -5,7 +5,7 @@
  * plain reads, and a quiz being unsaveable is not a reason to interrupt someone
  * mid-game. Failures degrade to "it just doesn't persist".
  */
-import type { FeatureRef, KindId, QuizSpec } from './types.ts';
+import type { KindId, QuizSpec } from './types.ts';
 
 const QUIZ_KEY = 'terrain-nerd:quizzes';
 const BEST_KEY = 'terrain-nerd:best';
@@ -107,138 +107,9 @@ export const newQuizId = (): string =>
   `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 /**
- * A saved quiz file.
+ * Persists a whole list in one go.
  *
- * Deliberately carries the quiz only, never your scores. A saved file is the
- * quiz as a thing you made — something you could keep, re-import after clearing
- * site data, or hand to another pilot — and progress is personal to the browser
- * that earned it. Restoring therefore never touches your best scores either way.
+ * Used by the session to mirror the account's quizzes locally, so a browser
+ * that opens offline still has them.
  */
-export type QuizFile = {
-  app: 'terrain-nerd';
-  version: 2;
-  exportedAt: string;
-  quizzes: QuizSpec[];
-};
-
-export const FILE_VERSION = 2;
-
-/**
- * Versions this build can read.
- *
- * Version 1 held `featureIds`; version 2 holds `features`. A version 1 file is
- * lifted on the way in by `migrateSpec`, so a file exported before any of this
- * existed still imports and plays.
- */
-const READABLE = new Set([1, FILE_VERSION]);
-
-export function makeQuizFile(quizzes: QuizSpec[]): QuizFile {
-  return {
-    app: 'terrain-nerd',
-    version: FILE_VERSION,
-    exportedAt: new Date().toISOString(),
-    quizzes,
-  };
-}
-
-const isRef = (value: unknown): value is FeatureRef => {
-  const ref = value as FeatureRef | null;
-  return typeof ref?.id === 'string' && typeof ref.kind === 'string';
-};
-
-/**
- * Either shape counts: a version 2 file carries `features`, a version 1 file
- * carries `featureIds`, and both are readable. What is checked is that one of
- * them is there and well formed — a file with neither is not a quiz.
- */
-const isQuiz = (value: unknown): value is QuizSpec => {
-  const quiz = value as QuizSpec | null;
-  const refs = Array.isArray(quiz?.features) && quiz.features.every(isRef);
-  const ids =
-    Array.isArray(quiz?.featureIds) && quiz.featureIds.every((id) => typeof id === 'string');
-  return (
-    typeof quiz?.id === 'string' &&
-    typeof quiz.name === 'string' &&
-    (refs || ids) &&
-    Array.isArray(quiz.bbox) &&
-    quiz.bbox.length === 4 &&
-    quiz.bbox.every((n) => typeof n === 'number' && Number.isFinite(n))
-  );
-};
-
-/**
- * Validates a file someone hands us.
- *
- * A quiz file is the one thing here that comes from outside the app, so it is
- * checked rather than trusted: a malformed import that half-succeeded would be
- * worse than one that refused.
- */
-export function readQuizFile(text: string): QuizFile {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error('That file is not JSON.');
-  }
-
-  const file = parsed as Partial<QuizFile> | null;
-  if (file?.app !== 'terrain-nerd') throw new Error('That is not a Terrain Nerd quiz file.');
-  if (typeof file.version !== 'number' || !READABLE.has(file.version)) {
-    throw new Error(`Quiz file version ${String(file.version)} is not supported.`);
-  }
-  if (!Array.isArray(file.quizzes) || !file.quizzes.every(isQuiz)) {
-    throw new Error('That file does not contain a readable quiz.');
-  }
-
-  // Any other fields — an older file's scores, say — are ignored rather than
-  // rejected, so a file written before scores were dropped still imports.
-  return {
-    app: 'terrain-nerd',
-    version: FILE_VERSION,
-    exportedAt: String(file.exportedAt ?? ''),
-    quizzes: file.quizzes.map(migrateSpec),
-  };
-}
-
-export type MergeResult = {
-  quizzes: QuizSpec[];
-  added: number;
-  replaced: number;
-};
-
-/**
- * Folds an imported file into what is already here.
- *
- * Merges rather than overwrites, so importing onto a browser that has its own
- * quizzes cannot silently destroy them. Same id means the same quiz and the
- * incoming copy wins — but your best score for it is left exactly as it was,
- * since the file never carried one.
- */
-export function mergeQuizFile(current: QuizSpec[], file: QuizFile): MergeResult {
-  const byId = new Map(current.map((quiz) => [quiz.id, quiz]));
-  let added = 0;
-  let replaced = 0;
-
-  for (const quiz of file.quizzes) {
-    if (byId.has(quiz.id)) replaced++;
-    else added++;
-    byId.set(quiz.id, quiz);
-  }
-
-  return { quizzes: [...byId.values()], added, replaced };
-}
-
-/** Persists a merged import in one go. */
 export const saveQuizzes = (quizzes: QuizSpec[]): boolean => write(QUIZ_KEY, quizzes);
-
-/** A quiz name turned into something safe to write to disk. */
-export function quizFilename(name: string): string {
-  const slug = name
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Val d'Algone, Care Alto: strip the accents
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-  return `terrain-nerd-${slug || 'quiz'}.json`;
-}

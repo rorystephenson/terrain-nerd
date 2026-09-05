@@ -1,7 +1,6 @@
 <script lang="ts">
   import Account from './Account.svelte';
   import Share from './Share.svelte';
-  import { makeQuizFile, mergeQuizFile, quizFilename, readQuizFile } from './storage.ts';
   import type { PoolIndex, QuizSpec } from './types.ts';
 
   type Props = {
@@ -13,7 +12,6 @@
     onplay: (quiz: QuizSpec) => void;
     onedit: (quiz: QuizSpec) => void;
     ondelete: (quiz: QuizSpec) => void;
-    onimport: (quizzes: QuizSpec[]) => void;
     /** A link pointed at a quiz that is not there any more. */
     missing: boolean;
     /** Brings a quiz up to date against the pool before it is published. */
@@ -28,59 +26,14 @@
     onplay,
     onedit,
     ondelete,
-    onimport,
     missing,
     onprepare,
   }: Props = $props();
 
-  /** Which quiz has its share panel open, if any. */
-  let sharing = $state<string | null>(null);
-
   const total = $derived(index.kinds.reduce((sum, kind) => sum + kind.count, 0));
 
-  let picker: HTMLInputElement;
-  let note = $state<{ tone: 'ok' | 'bad'; text: string } | null>(null);
-
-  /**
-   * Writes one quiz out as a download.
-   *
-   * Quizzes live only in this browser's localStorage, which is wiped by
-   * clearing site data and is not synced anywhere — so a file you keep yourself
-   * is the only thing standing between you and losing one. The file holds the
-   * quiz alone: your scores stay here, where you earned them.
-   */
-  function exportOne(quiz: QuizSpec) {
-    const blob = new Blob([JSON.stringify(makeQuizFile([quiz]), null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = quizFilename(quiz.name);
-    link.click();
-    URL.revokeObjectURL(url);
-    note = { tone: 'ok', text: `Saved “${quiz.name}”.` };
-  }
-
-  async function importQuiz(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    // Cleared straight away so picking the same file twice still fires a change.
-    input.value = '';
-    if (!file) return;
-
-    try {
-      const merged = mergeQuizFile(quizzes, readQuizFile(await file.text()));
-      onimport(merged.quizzes);
-      const parts = [
-        merged.added > 0 ? `${merged.added} added` : '',
-        merged.replaced > 0 ? `${merged.replaced} updated` : '',
-      ].filter(Boolean);
-      note = { tone: 'ok', text: parts.length ? `Loaded: ${parts.join(', ')}.` : 'Nothing new to load.' };
-    } catch (error) {
-      note = { tone: 'bad', text: error instanceof Error ? error.message : String(error) };
-    }
-  }
+  /** Which quiz has its share panel open, if any. */
+  let sharing = $state<string | null>(null);
 </script>
 
 <div class="picker">
@@ -125,7 +78,6 @@
             title="Share"
             aria-label="Share {quiz.name}"
             onclick={() => (sharing = sharing === quiz.id ? null : quiz.id)}>⇪</button>
-          <button class="icon" title="Save to file" aria-label="Save {quiz.name} to file" onclick={() => exportOne(quiz)}>↓</button>
           <button class="icon" title="Edit" aria-label="Edit {quiz.name}" onclick={() => onedit(quiz)}>✎</button>
           <button class="icon" title="Delete" aria-label="Delete {quiz.name}" onclick={() => ondelete(quiz)}>×</button>
         </li>
@@ -140,28 +92,6 @@
       actually want to know, and skip the rest.
     </p>
   {/if}
-
-  <section class="backup">
-    <h2>Quiz files</h2>
-    <p class="why">
-      Quizzes are stored in this browser only, so clearing site data loses them. Use
-      <span class="glyph">↓</span> on a quiz to save it to a file. A file holds the quiz
-      itself, not your scores.
-    </p>
-    <div class="backup-actions">
-      <button onclick={() => picker.click()}>Load a quiz from file</button>
-    </div>
-    <input
-      class="file-input"
-      type="file"
-      accept="application/json,.json"
-      bind:this={picker}
-      onchange={importQuiz}
-    />
-    {#if note}
-      <p class="note" class:bad={note.tone === 'bad'}>{note.text}</p>
-    {/if}
-  </section>
 
   <footer>
     {total.toLocaleString()} named features · {index.attribution} · data {index.generatedAt}
@@ -274,32 +204,6 @@
     border-radius: 10px;
   }
 
-  .backup {
-    margin-top: 2rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
-  }
-  .backup h2 { margin-top: 0; }
-  .why { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--muted); line-height: 1.5; }
-  .glyph { color: #1d232b; font-weight: 700; }
-  .backup-actions { display: flex; gap: 0.5rem; }
-  .backup-actions button {
-    flex: 1;
-    padding: 0.6rem;
-    font: inherit;
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.15);
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .backup-actions button:hover:not(:disabled) { border-color: var(--accent); }
-  .backup-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
-  /* Driven by the buttons above; a bare file input is ugly. Note this must not
-     be called `.picker` — that is the root element's class, and the rule would
-     hide the entire page. */
-  .file-input { display: none; }
-  .note { margin: 0.6rem 0 0; font-size: 0.85rem; color: var(--accent); }
-  .note.bad { color: var(--wrong); }
 
   footer {
     margin-top: 1.75rem;
