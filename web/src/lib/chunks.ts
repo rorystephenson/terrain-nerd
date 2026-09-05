@@ -8,7 +8,6 @@
  */
 import { boxesOverlap, cellsCovering, geometryIntersectsBox, pointInBox } from './grid.ts';
 import { visibleAtZoom } from './places.ts';
-import { resolveFeatures, type Resolution } from './resolve.ts';
 import type {
   FeatureRef,
   KindId,
@@ -128,6 +127,9 @@ export async function loadArea(
   return [...byId.values()];
 }
 
+/** What a quiz asked for, and what the pool actually had. */
+export type Resolution = { features: QuizFeature[]; missing: FeatureRef[] };
+
 /**
  * The features a saved quiz refers to.
  *
@@ -135,12 +137,15 @@ export async function loadArea(
  * what says where to look — and because it covers every chosen feature, the
  * cells it touches must hold them all.
  *
- * Returns a `Resolution` rather than a plain list because a reference can fail:
- * ids move when the pool is rebuilt, and features are deleted from OSM. This
+ * Reports what it could not find rather than returning a shorter list. This
  * used to be `ids.flatMap((id) => byId.get(id) ?? [])`, which turned a broken
- * reference into a shorter quiz with nothing said about it — a score that still
- * read as a percentage and quietly meant something else. `resolve.ts` finds what
- * it can and names what it cannot.
+ * reference into a quiz with fewer questions and nothing said about it — a
+ * score that still read as a percentage and quietly meant something else.
+ *
+ * Nothing here tries to *repair* a broken reference. Ids do not move without
+ * the pipeline stopping to say so — see `pipeline/src/ids.ts` — so a reference
+ * that fails here means the feature is genuinely gone, and the honest thing is
+ * to name it.
  */
 export async function loadRefs(
   index: PoolIndex,
@@ -149,7 +154,16 @@ export async function loadRefs(
 ): Promise<Resolution> {
   const kinds = [...new Set(refs.map((ref) => ref.kind))];
   const found = await loadArea(index, bbox, kinds);
-  return resolveFeatures(found, refs);
+  const byId = new Map(found.map((feature) => [feature.id, feature]));
+
+  const features: QuizFeature[] = [];
+  const missing: FeatureRef[] = [];
+  for (const ref of refs) {
+    const hit = byId.get(ref.id);
+    if (hit) features.push(hit);
+    else missing.push(ref);
+  }
+  return { features, missing };
 }
 
 /**

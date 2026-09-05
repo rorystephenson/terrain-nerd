@@ -18,7 +18,7 @@ const spec = (over: Partial<QuizSpec> = {}): QuizSpec => ({
   name: 'Brenta',
   source: 'built',
   createdAt: '2026-01-01T00:00:00.000Z',
-  features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] }],
+  features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa' }],
   bbox: [10, 46, 11, 47],
   ...over,
 });
@@ -70,36 +70,36 @@ test('one malformed reference does not cost the whole quiz', () => {
   const doc = {
     ...specToDoc(spec(), 'u1', 'now'),
     features: [
-      { id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] },
-      { id: 'peak/n2', kind: 'wyvern', name: 'X', at: [10, 46] }, // not a kind this app has
+      { id: 'peak/n1', kind: 'peak', name: 'Cima Tosa' },
+      { id: 'peak/n2', kind: 'wyvern', name: 'X' }, // not a kind this app has
       null,
-      { kind: 'peak', name: 'X', at: [10, 46] }, // no id
-      { id: 'peak/n4', kind: 'peak', at: [10, 46] }, // no name: cannot be rescued
-      { id: 'peak/n5', kind: 'peak', name: 'Y' }, // no anchor: likewise
-      { id: 'valley/w3', kind: 'valley', name: 'Val', at: [10.75, 46.1] },
+      { kind: 'peak', name: 'X' }, // no id
+      { id: 'peak/n4', kind: 'peak' }, // no name: could not say what was lost
+      { id: 'valley/w3', kind: 'valley', name: 'Val' },
     ],
   };
   assert.deepEqual(docToSpec('q1', doc)?.features.map((f) => f.id), ['peak/n1', 'valley/w3']);
 });
 
-test('a reference keeps what it has and omits what it does not', () => {
-  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2] }), {
-    id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2],
+test('a reference is exactly three fields, and nothing else is carried', () => {
+  assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', name: 'X' }), {
+    id: 'peak/n1', kind: 'peak', name: 'X',
   });
+  // Whatever else a document holds is not a reference's business — an older
+  // shape carrying anchors and wikidata reads as the three fields it has.
   assert.deepEqual(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2], wikidata: 'Q1' }), {
-    id: 'peak/n1', kind: 'peak', name: 'X', at: [1, 2], wikidata: 'Q1',
+    id: 'peak/n1', kind: 'peak', name: 'X',
   });
-  // A reference that cannot be rescued by name and place is not one we keep:
-  // it could only ever be resolved by an id that may have moved.
-  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', at: [1, 2] }), null, 'no name');
-  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', name: 'X' }), null, 'no anchor');
-  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: [1] }), null, 'half an anchor');
-  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', name: 'X', at: 'there' }), null);
+  assert.equal(readRef({ id: 'peak/n1', kind: 'peak' }), null, 'no name');
+  assert.equal(readRef({ id: 'peak/n1', kind: 'peak', name: '' }), null, 'an empty name is no name');
+  assert.equal(readRef({ kind: 'peak', name: 'X' }), null, 'no id');
+  assert.equal(readRef({ id: 'peak/n1', kind: 'wyvern', name: 'X' }), null, 'not a kind we have');
+  assert.equal(readRef(null), null);
 });
 
 test('an oversized quiz is clamped rather than written whole', () => {
   const many = Array.from({ length: MAX_FEATURES + 50 }, (_, i) => ({
-    id: `peak/n${i}`, kind: 'peak' as const, name: `Peak ${i}`, at: [10, 46] as [number, number],
+    id: `peak/n${i}`, kind: 'peak' as const, name: `Peak ${i}`,
   }));
   assert.equal(specToDoc(spec({ features: many }), 'u1', 'now').features.length, MAX_FEATURES);
 });
@@ -130,8 +130,8 @@ test('publishing keeps what a round needs and drops what only the builder wanted
     poolAt: '2026-08-01',
     builder: { kinds: { peak: true }, ranges: {}, overrides: { 'peak/n1': 'in' } },
     features: [
-      { id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] },
-      { id: 'valley/w2', kind: 'valley', name: 'Val Rendena', at: [10.75, 46.1] },
+      { id: 'peak/n1', kind: 'peak', name: 'Cima Tosa' },
+      { id: 'valley/w2', kind: 'valley', name: 'Val Rendena' },
     ],
   });
   const doc = specToPublished(draft, { id: 'u1', name: 'Rory' }, 1, '2026-09-05T00:00:00.000Z');
@@ -152,9 +152,9 @@ test('the headline count is questions, not features', () => {
   // percentage of questions — so a quiz must not advertise the other number.
   const draft = spec({
     features: [
-      { id: 'valley/w1', kind: 'valley', name: 'Valsorda', at: [10.7, 46.1] },
-      { id: 'valley/w2', kind: 'valley', name: 'valsorda ', at: [11.6, 46.1] },
-      { id: 'peak/n3', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] },
+      { id: 'valley/w1', kind: 'valley', name: 'Valsorda' },
+      { id: 'valley/w2', kind: 'valley', name: 'valsorda ' },
+      { id: 'peak/n3', kind: 'peak', name: 'Cima Tosa' },
     ],
   });
   const doc = specToPublished(draft, { id: 'u1', name: 'Rory' }, 1, 'now');

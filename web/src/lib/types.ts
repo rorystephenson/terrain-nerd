@@ -126,24 +126,20 @@ export type BuilderState = {
 /**
  * A feature as a quiz remembers it.
  *
- * An id alone was enough while a quiz never left the browser that built it: the
- * pool it pointed into was the pool that made it. Shared quizzes break that.
- * The pool is rebuilt from OSM, and an id can move — a way gets deleted, a
- * valley's segments cluster differently — at which point a quiz holding bare
- * ids quietly asks a shorter round and nobody can tell that it did.
+ * The id is what identifies it, and the pipeline guarantees that: `ids.txt`
+ * records every id the last accepted build produced, and a build that loses one
+ * stops rather than shipping a pool that would quietly shorten somebody's quiz.
+ * So the id is relied on here, and the rare event is handled where it can be
+ * seen rather than by every client forever.
  *
- * So a quiz carries enough to find a feature again without its id: what it is
- * called, what kind it is, roughly where it stands, and its wikidata entity when
- * OSM has one. See `resolve.ts` for what does the finding.
+ * `kind` says which chunk directory to fetch from without parsing the id, and
+ * `name` is carried so a quiz can say what it has lost when a feature really
+ * has gone — by then the pool no longer has a name to look up.
  */
 export type FeatureRef = {
   id: string;
   kind: KindId;
   name: string;
-  /** The feature's own anchor, so same-named features can be told apart. */
-  at: [number, number];
-  /** The most durable key there is, when OSM carries one. */
-  wikidata?: string;
 };
 
 /** One replayable quiz: a frozen set of features. */

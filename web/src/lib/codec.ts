@@ -47,17 +47,12 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 const isBox = (v: unknown): v is [number, number, number, number] =>
   Array.isArray(v) && v.length === 4 && v.every(isNum);
 
-const isPoint = (v: unknown): v is [number, number] =>
-  Array.isArray(v) && v.length === 2 && v.every(isNum);
-
 /**
  * One reference, or nothing.
  *
- * All four of id, kind, name and anchor are required, because a reference
- * without the last two can only ever be resolved by an id that may have moved —
- * and a published quiz is the copy that cannot be repaired afterwards. Anything
- * short of that is dropped rather than carried through as a feature the round
- * might silently fail to find.
+ * All three fields are required. A reference with no name could still be
+ * *played* — the pool has the name — but not reported when the feature is
+ * gone, which is the one moment the quiz has to speak for itself.
  */
 export function readRef(value: unknown): FeatureRef | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -65,15 +60,7 @@ export function readRef(value: unknown): FeatureRef | null {
   if (typeof raw.id !== 'string' || raw.id.length === 0) return null;
   if (typeof raw.kind !== 'string' || !KINDS.has(raw.kind)) return null;
   if (typeof raw.name !== 'string' || raw.name.length === 0) return null;
-  if (!isPoint(raw.at)) return null;
-
-  return {
-    id: raw.id,
-    kind: raw.kind as KindId,
-    name: raw.name,
-    at: raw.at,
-    ...(typeof raw.wikidata === 'string' ? { wikidata: raw.wikidata } : {}),
-  };
+  return { id: raw.id, kind: raw.kind as KindId, name: raw.name };
 }
 
 /**
@@ -144,13 +131,9 @@ export function specToDoc(spec: QuizSpec, ownerId: string, now: string): QuizDoc
     source: spec.source,
     createdAt: spec.createdAt,
     updatedAt: now,
-    features: spec.features.slice(0, MAX_FEATURES).map((ref) => ({
-      id: ref.id,
-      kind: ref.kind,
-      name: ref.name,
-      at: ref.at,
-      ...(ref.wikidata !== undefined ? { wikidata: ref.wikidata } : {}),
-    })),
+    features: spec.features
+      .slice(0, MAX_FEATURES)
+      .map((ref) => ({ id: ref.id, kind: ref.kind, name: ref.name })),
     bbox: spec.bbox,
     ...(spec.poolAt !== undefined ? { poolAt: spec.poolAt } : {}),
     ...(spec.builder !== undefined ? { builder: spec.builder } : {}),
@@ -238,13 +221,9 @@ export function specToPublished(
   version: number,
   now: string,
 ): PublishedDoc {
-  const features = spec.features.slice(0, MAX_FEATURES).map((ref) => ({
-    id: ref.id,
-    kind: ref.kind,
-    name: ref.name,
-    at: ref.at,
-    ...(ref.wikidata !== undefined ? { wikidata: ref.wikidata } : {}),
-  }));
+  const features = spec.features
+    .slice(0, MAX_FEATURES)
+    .map((ref) => ({ id: ref.id, kind: ref.kind, name: ref.name }));
 
   const counts = { valley: 0, peak: 0, pass: 0 };
   for (const ref of features) counts[ref.kind] += 1;

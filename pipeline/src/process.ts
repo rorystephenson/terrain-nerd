@@ -26,6 +26,7 @@ import { bboxOf, lineLengthKm, type BBox, type LonLat } from './geo.ts';
 import { cellsCovering } from './grid.ts';
 import { normalize, type QuizFeature } from './normalize.ts';
 import { OUT_DIR } from './paths.ts';
+import { byKind, compareIds, readManifest, report, writeManifest } from './ids.ts';
 import {
   assignZoomRanges,
   LABEL_BOX,
@@ -210,6 +211,8 @@ async function buildTerrain(coverage: Coverage | null) {
   console.log(`    hand over to finer names: ${zooms.max.size.toLocaleString()}`);
 
   return {
+    // Kept out of the index — see `main`, which peels it off before writing.
+    ids: features.map((feature) => feature.id),
     kinds,
     places: {
       count: placeFeatures.length,
@@ -536,12 +539,13 @@ async function main() {
     options: {
       'skip-water': { type: 'boolean', default: false },
       'skip-context': { type: 'boolean', default: false },
+      'accept-id-changes': { type: 'boolean', default: false },
     },
   });
 
   console.log('Processing extracted pool:');
   const chosen = readCoverage();
-  const terrain = await buildTerrain(chosen);
+  const { ids, ...terrain } = await buildTerrain(chosen);
   // Roads and glaciers change even less often than the terrain does, and tuning
   // how place names are thinned means re-running this repeatedly.
   const context = values['skip-context'] ? { count: 0 } : await buildContext();
@@ -577,6 +581,44 @@ async function main() {
     coverage: chosen ? { zoom: chosen.zoom, cells: chosen.cells } : null,
   });
   console.log('\n  wrote index.json');
+
+  /*
+   * The last thing, and the only one that can stop the build.
+   *
+   * A feature id is what a saved quiz refers to, and a published quiz is a
+   * permanent one held by other people — so an id that moves silently takes a
+   * feature out of somebody's quiz. Checking here means the person who caused
+   * it is the person who hears about it, once, rather than every client
+   * carrying a repair for a rare event forever.
+   *
+   * The pool has already been written by this point, deliberately: what has
+   * been built is fine and worth keeping, and refusing to update the manifest
+   * is what makes this sticky — the next run reports the same thing until it
+   * is accepted.
+   */
+  const before = await readManifest();
+  if (!before) {
+    await writeManifest(ids);
+    console.log(`  ids: ${ids.length.toLocaleString()} recorded (${byKind(ids)}) — no previous manifest`);
+    return;
+  }
+
+  const check = compareIds(before, ids);
+  console.log(report(check));
+
+  if (check.gone.length > 0 && !values['accept-id-changes']) {
+    throw new Error(
+      `${check.gone.length} feature id${check.gone.length === 1 ? '' : 's'} that existed before ` +
+        'no longer do.\n' +
+        '  Any saved or published quiz referring to them has quietly lost those features.\n' +
+        '  If that is expected — coverage shrank, or OSM really did drop them — re-run with\n' +
+        '  --accept-id-changes, which records the new set and shows the change as a diff of\n' +
+        '  pipeline/ids.txt. The pool on disk is already built; only the manifest is held back.',
+    );
+  }
+
+  await writeManifest(ids);
+  if (check.gone.length > 0) console.log('  ids: change accepted, manifest updated');
 }
 
 /** Only run the CLI when invoked directly — this module is imported for its constants too. */

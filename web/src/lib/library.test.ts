@@ -9,7 +9,7 @@ const quiz = (id: string, over: Partial<QuizSpec> = {}): QuizSpec => ({
   name: id,
   source: 'built',
   createdAt: '2026-01-01T00:00:00.000Z',
-  features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] }],
+  features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa' }],
   bbox: [10, 46, 11, 47],
   ...over,
 });
@@ -75,12 +75,12 @@ test('a difference only in derived detail is not a conflict', () => {
   // Names and anchors come from the pool, so a difference in them says nothing
   // about intent and must not put a question in front of anyone.
   const here = quiz('a', {
-    features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa', at: [10.87, 46.16] }],
+    features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa' }],
   });
   const there = quiz('a', {
     // The same feature, described from a pool built a day apart: the anchor
     // moved a few metres and the spelling was tidied in OSM.
-    features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa ', at: [10.8711, 46.1566] }],
+    features: [{ id: 'peak/n1', kind: 'peak', name: 'Cima Tosa ' }],
   });
 
   assert.equal(sameQuiz(here, there), true);
@@ -90,8 +90,8 @@ test('a difference only in derived detail is not a conflict', () => {
 test('a different set of features is a conflict even under the same name', () => {
   const four = quiz('a', {
     features: [
-      { id: 'peak/n1', kind: 'peak', name: 'A', at: [10, 46] },
-      { id: 'peak/n2', kind: 'peak', name: 'B', at: [11, 46] },
+      { id: 'peak/n1', kind: 'peak', name: 'A' },
+      { id: 'peak/n2', kind: 'peak', name: 'B' },
     ],
   });
   assert.equal(sameQuiz(quiz('a'), four), false);

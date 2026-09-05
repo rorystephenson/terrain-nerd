@@ -2,7 +2,6 @@
   import { untrack } from 'svelte';
   import MapView from './MapView.svelte';
   import { loadArea, loadRefs, loadPlaces } from './chunks.ts';
-  import { matchedFeatures } from './resolve.ts';
   import {
     clearOverrides,
     clearSpacing,
@@ -203,8 +202,7 @@
   $effect(() => {
     if (!editing || area) return;
     let cancelled = false;
-    loadRefs(index, editing.bbox, editing.features).then((resolved) => {
-      const chosen = matchedFeatures(resolved);
+    loadRefs(index, editing.bbox, editing.features).then(({ features: chosen }) => {
       if (cancelled || chosen.length === 0) return;
       let box: [number, number, number, number] | null = null;
       for (const { properties } of chosen) {
@@ -345,14 +343,12 @@
       source: 'built',
       createdAt: editing?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      // Names and anchors travel with the ids, so a quiz can find its features
-      // again after a pool rebuild moves one. See `resolve.ts`.
+      // The name travels with the id so the quiz can say what it has lost if a
+      // feature ever really goes; the id itself is guaranteed by `ids.txt`.
       features: picked.included.map((f) => ({
         id: f.id,
         kind: f.properties.kind,
         name: f.properties.name,
-        at: f.properties.anchor,
-        ...(f.properties.wikidata ? { wikidata: f.properties.wikidata } : {}),
       })),
       // From the features, not the builder viewport: however the map was left,
       // the quiz frames itself sensibly.

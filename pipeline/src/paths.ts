@@ -17,3 +17,11 @@ export const CACHE_DIR = join(HERE, '..', 'cache');
  * is nothing to copy and nothing to keep in sync.
  */
 export const OUT_DIR = join(CACHE_DIR, 'data');
+
+/**
+ * Every feature id the last accepted build produced, sorted, one per line.
+ *
+ * Committed rather than cached: the whole point is that a change to it is a
+ * change somebody has to look at and agree to, and a diff is how that is read.
+ */
+export const ID_MANIFEST = join(HERE, '..', 'ids.txt');

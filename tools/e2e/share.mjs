@@ -23,9 +23,9 @@ const reset = async () => {
 const quiz = [{
   id: 'brenta1', name: 'The Brenta', source: 'built', createdAt: '2026-01-01T00:00:00.000Z',
   features: [
-    { id: 'peak/n26862712', kind: 'peak', name: 'Cima Tosa', at: [10.87113, 46.15652] },
-    { id: 'peak/n26862689', kind: 'peak', name: 'Cima Brenta', at: [10.89991, 46.17946] },
-    { id: 'peak/n206124143', kind: 'peak', name: 'Doss del Sabion', at: [10.80658, 46.16749] },
+    { id: 'peak/n26862712', kind: 'peak', name: 'Cima Tosa' },
+    { id: 'peak/n26862689', kind: 'peak', name: 'Cima Brenta' },
+    { id: 'peak/n206124143', kind: 'peak', name: 'Doss del Sabion' },
   ],
   bbox: [10.70, 46.05, 10.95, 46.30],
 }];
@@ -77,11 +77,9 @@ console.log('published doc : version', pub.fields.version.integerValue,
 const v1 = await (await fetch(`${FS}/published/brenta1/versions/1`, ADMIN)).json();
 console.log('frozen v1     :', v1.fields ? 'stored' : 'MISSING');
 
-// What gets frozen must carry the names and anchors that let a moved id be
-// found again: a published quiz is the copy that cannot be repaired later.
+// The name travels so a quiz can say what it has lost if a feature ever goes.
 const refs = pub.fields.features.arrayValue.values.map((v) => v.mapValue.fields);
-console.log('published refs:', refs.map((f) =>
-  `${f.name?.stringValue ?? 'NO NAME'}${f.at ? '' : ' NO ANCHOR'}`).join(' | '));
+console.log('published refs:', refs.map((f) => f.name?.stringValue ?? 'NO NAME').join(' | '));
 
 // ---- A stranger opens the link ---------------------------------------------
 // A fresh context: different anonymous uid, nothing in localStorage.

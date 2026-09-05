@@ -48,7 +48,7 @@ const emailOf = async (uid) => {
 
 const seed = (label) => ([{
   id: 'q-' + label, name: 'From ' + label, source: 'built', createdAt: '2026-01-01T00:00:00.000Z',
-  features: [{ id: 'peak/n26862712', kind: 'peak', name: 'Cima Tosa', at: [10.87113, 46.15652] }],
+  features: [{ id: 'peak/n26862712', kind: 'peak', name: 'Cima Tosa' }],
   bbox: [10.70, 46.05, 10.95, 46.30],
 }]);
 

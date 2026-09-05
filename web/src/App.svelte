@@ -10,7 +10,6 @@
   import Results from './lib/Results.svelte';
   import { loadIndex, loadPlaces, loadRefs } from './lib/chunks.ts';
   import { placeFetchBox } from './lib/places.ts';
-  import { matchedFeatures } from './lib/resolve.ts';
   import { useCoverage } from './lib/tiles.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
   import { session } from './lib/session.svelte.ts';
@@ -135,9 +134,8 @@
     loadRefs(pool, spec.bbox, spec.features)
       .then((resolved) => {
         if (cancelled) return;
-        const found = matchedFeatures(resolved);
-        features = found;
-        quiz = createQuiz(found);
+        features = resolved.features;
+        quiz = createQuiz(resolved.features);
         gone = resolved.missing.map((ref) => ref.name);
       })
       .catch((error: unknown) => {
