@@ -225,10 +225,13 @@ npm run dev          # http://localhost:5173
 ```
 
 The app needs the data pool to exist first — see below — and the basemap tiles
-to have been rendered, see [The map](#the-map). In production those tiles come
-from Cloudflare R2; a dev server reads them out of `pipeline/cache/tiles`
-instead, so local work needs no upload and keeps working offline against
-whatever has been rendered so far.
+to have been rendered, see [The map](#the-map). In production both come from
+Cloudflare R2; a dev server reads them out of `pipeline/cache/data` and
+`pipeline/cache/tiles` instead, so local work needs no upload and keeps working
+offline against whatever has been built so far.
+
+Neither is in `web/public`, so neither is copied into the build: `dist` is 2 MB
+of app, against the 40 MB of pool and 130 MB of tiles it points at.
 
 ## Data
 
@@ -325,17 +328,33 @@ Five commands, in order, and nothing to clean up by hand:
 npm run coverage       # click the new squares, Save
 npm run extract:data   # downloads anything new, re-clips, re-filters
 npm run build:data     # skyways tiles, scores, chunks, place-name zooms
+npm run upload:data    # sends the cells that changed, then the index
 npm run render:tiles   # draws the new tiles and the wider ones they invalidate
 npm run upload:tiles   # sends what is new or changed
 ```
 
 Every step works out for itself what the change cost it, from the coverage
 rather than from a timestamp: which extracts to re-clip, which tiles to redraw,
-which objects to send. All five are safe to re-run, and three of them do nothing
-at all when nothing changed — `extract:data` and `render:tiles` and
+which objects to send. All six are safe to re-run, and four of them do nothing
+at all when nothing changed — `extract:data`, `upload:data`, `render:tiles` and
 `upload:tiles` over unchanged coverage are each a few seconds of checking.
 `build:data` is the exception: it rebuilds the pool every time, which is what
 its `--skip-` flags are for.
+
+Both uploads decide what to send by **content rather than presence**: R2 returns
+each object's MD5 as its ETag, so anything whose bytes match is skipped. Presence
+alone would not do, because a redrawn tile and a rebuilt cell both keep the path
+they had, and skipping what was already there would leave the old bytes live.
+
+`upload:data` has two jobs the tile upload does not. **The index goes last** —
+it is the manifest, the app never asks for a cell it does not list, and
+`loadCell` turns a failed fetch into empty ground rather than an error. Sent
+first, it would advertise cells that were not up yet and the symptom would be
+quizzes quietly missing features rather than anything that looked broken. And
+**orphans are removed**, because a rebuilt pool can drop a cell where the tiles
+only ever accumulate; that happens after the index is live, and stops to ask if
+it would take more than a quarter of what is there, which looks more like a
+half-built pool than a shrunken one.
 
 A coverage change is not incremental in the extracts. Every source is re-clipped
 and every layer re-filtered, because a clip is cut against the whole coverage
@@ -428,7 +447,7 @@ extract is one download, filtered in seconds, and re-filtering costs nothing.
 ### Chunking
 
 The pool is far too big to load at once, so it ships as **z9 tiles** (~55 km
-square at Alpine latitudes) under `web/public/data/<kind>/<cell>.geojson`, with
+square at Alpine latitudes) under `pipeline/cache/data/<kind>/<cell>.geojson`, with
 an `index.json` listing which cells hold anything. The app loads only the cells
 its area touches, and only for the feature types that are switched on. Tiles
 rather than the degree cells this started with, so that the chunk grid, the
@@ -725,7 +744,8 @@ pipeline/          run on demand, never at build time
   grid.ts          the chunk grid, in tiles
 tools/             dev tools, on their own Vite roots
   coverage/        pick the ground, and the extracts that cover it cheapest
-  render/          draw the tile pyramid, and upload it to R2
+  render/          draw the tile pyramid
+  upload/          r2.mjs, and the two things that go in the bucket
   rules/           what the security rules actually allow
   e2e/             signing in across two machines, against the emulator
 firestore.rules    what the client may do, enforced by the database
@@ -786,11 +806,18 @@ npm run test:e2e     # signing in across two machines (needs the emulator + a de
   area outside the rendered ground and you get a placeholder basemap and an
   empty quiz rather than a refusal. The bundled coverage set is right there; it
   is simply not consulted at that point yet.
-- **`web/public/data/` is ~39 MB**, of which place names are 12 MB and peaks
-  20 MB. That is a hosting number, not a per-visit one: cells load individually,
-  and a Val Rendena viewport pulls a few hundred kilobytes across four cells.
-  The basemap's 130 MB is not on that server at all — it is in R2, where egress
-  is free.
+- **The pool is ~40 MB**, of which place names are 12 MB and peaks 21 MB. That
+  is a storage number, not a per-visit one: cells load individually, and one
+  Val Rendena cell across all four kinds is 428 KB. It is in R2 beside the
+  basemap's 130 MB, where egress is free, so the site itself is 2 MB.
+- **A new deploy domain needs adding to the bucket's CORS allowlist**, and
+  forgetting it fails in a way development cannot show. Both the basemap and the
+  pool are read with `fetch` from a page that is not on the bucket's origin, so
+  both depend on that origin being named in the policy — but a dev server serves
+  both same-origin off disk, so a build that will show a blank map and empty
+  quizzes looks perfectly healthy locally. The policy is an allowlist kept in
+  the Cloudflare dashboard; `npm run r2:cors -- https://the-new-domain` says
+  whether it is in it.
 - **A style change costs a re-render**, not a page refresh:
   `npm run render:tiles -- --force`, six minutes with a warm DEM cache, then an
   upload of whatever actually changed. Coverage changes are incremental;

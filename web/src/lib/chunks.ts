@@ -17,7 +17,21 @@ import type {
   QuizFeature,
 } from './types.ts';
 
-const BASE = 'data';
+/**
+ * Where the pool lives, as an **absolute** URL.
+ *
+ * It was `'data'`, relative, which worked for exactly as long as the app only
+ * ever sat at `/`. On a share link at `/q/abc` it resolves to `/q/data/...`,
+ * and `loadCell` swallows a failed fetch into an empty list — so a shared quiz
+ * would have opened silently empty rather than failing. A relative base is a
+ * bug that waits for a router.
+ *
+ * `VITE_DATA_BASE` is the same arrangement `VITE_TILE_BASE` already uses in
+ * `mapStyle.ts`, so the ~39 MB pool can move to R2 beside the tiles — where
+ * egress is free — without touching this file again. Optional-chained because
+ * `node --test` is not Vite.
+ */
+const BASE = import.meta.env?.VITE_DATA_BASE ?? '/data';
 
 /** Parsed cells, keyed `<dir>/<cell>`, kept for the life of the page. */
 const cells = new Map<string, unknown[]>();
