@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Account from './Account.svelte';
   import type { AnsweredQuestion } from './quiz.ts';
 
   type Props = {
@@ -20,6 +21,8 @@
      * scoring you out of a different total than it used to.
      */
     gone: string[];
+    /** Show the one-time offer to sign in. Decided by `App.svelte`, shown once ever. */
+    nudge: boolean;
     /** Folded away so the finished map can be studied. */
     collapsed: boolean;
     ontoggle: () => void;
@@ -37,6 +40,7 @@
     onreplay,
     onmenu,
     gone,
+    nudge,
     collapsed,
     ontoggle,
     nameOf,
@@ -85,6 +89,8 @@
           {gone.join(', ')}.
         </p>
       {/if}
+
+      {#if nudge}<Account variant="nudge" />{/if}
 
       <ul class="review">
         {#each answers as answer (answer.targetId)}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Account from './Account.svelte';
   import { makeQuizFile, mergeQuizFile, quizFilename, readQuizFile } from './storage.ts';
   import type { PoolIndex, QuizSpec } from './types.ts';
 
@@ -72,6 +73,7 @@
       asks the same set in a new order. Four tries a question, then you are shown the answer
       and have to go and click it.
     </p>
+    <Account />
   </header>
 
   <button class="build" onclick={onbuild}>+ Build a quiz</button>

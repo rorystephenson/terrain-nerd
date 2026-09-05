@@ -18,7 +18,8 @@
     "typecheck": "npm run typecheck -w pipeline && npm run check -w web && tsc -p tools/coverage --noEmit && tsc -p tools/rules --noEmit",
     "render:tiles": "node tools/render/render.mjs",
     "upload:tiles": "node tools/render/upload.mjs",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-terrain-nerd 'node --test tools/rules/rules.test.ts'"
+    "test:rules": "firebase emulators:exec --only firestore --project demo-terrain-nerd 'node --test tools/rules/rules.test.ts'",
+    "test:e2e": "node tools/e2e/flow.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1125.0",

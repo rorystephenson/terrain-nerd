@@ -16,3 +16,6 @@ web/public/data/
 tile-example.png
 water-wrong.png
 Screenshot*.png
+
+# Local env overrides (emulator switches). Never committed.
+*.local

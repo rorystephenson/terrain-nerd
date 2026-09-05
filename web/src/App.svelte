@@ -12,14 +12,8 @@
   import { healSpec } from './lib/heal.ts';
   import { useCoverage } from './lib/tiles.ts';
   import { gradeLabelColor } from './lib/mapStyle.ts';
-  import {
-    deleteQuiz as removeQuiz,
-    loadBest,
-    loadQuizzes,
-    recordBest,
-    saveQuiz,
-    saveQuizzes,
-  } from './lib/storage.ts';
+  import { session } from './lib/session.svelte.ts';
+  import { hasSeen, markSeen } from './lib/storage.ts';
   import {
     attempt,
     createQuiz,
@@ -56,8 +50,8 @@
   let loadError = $state<string | null>(null);
   let screen = $state<Screen>({ at: 'list' });
 
-  let quizzes = $state<QuizSpec[]>([]);
-  let best = $state<Record<string, number>>({});
+  const quizzes = $derived(session.quizzes);
+  const best = $derived(session.best);
 
   let features = $state.raw<QuizFeature[]>([]);
   /** Names of features this quiz refers to that the pool no longer holds. */
@@ -86,8 +80,7 @@
   const later = (fn: () => void, ms: number) => timers.push(setTimeout(fn, ms));
 
   $effect(() => {
-    quizzes = loadQuizzes();
-    best = loadBest();
+    session.init();
     loadIndex()
       .then((loaded) => {
         // Before anything draws: the tile protocol needs it to tell an
@@ -98,7 +91,10 @@
       .catch((error: unknown) => {
         loadError = error instanceof Error ? error.message : String(error);
       });
-    return clearTimers;
+    return () => {
+      clearTimers();
+      session.dispose();
+    };
   });
 
   // Loading a quiz's features is driven by the screen, so replaying or coming
@@ -121,7 +117,7 @@
         // quiz refers to, so a quiz saved before it carried them can be filled
         // in now. Playing an old quiz is what repairs it — see `migrateSpec`.
         const healed = healSpec(spec, resolved);
-        if (healed !== spec) saveQuiz(healed);
+        if (healed !== spec) session.save(healed);
       })
       .catch((error: unknown) => {
         if (!cancelled) loadError = error instanceof Error ? error.message : String(error);
@@ -228,11 +224,28 @@
 
   $effect(() => {
     if (finished && screen.at === 'play' && quiz) {
-      best = recordBest(best, screen.spec.id, score(quiz).pct);
+      session.recordScore(screen.spec.id, score(quiz).pct);
     }
   });
 
+  /**
+   * The one offer to sign in, at the one moment it is worth making.
+   *
+   * A finished round is when someone has a score they might mind losing, which
+   * is the only honest reason to raise it. Shown once ever, through the same
+   * mechanism the builder's explainers use — see `hasSeen` — so it can never
+   * become a thing you dismiss twice.
+   */
+  const NUDGE = 'signin';
+  let nudge = $state(false);
+  $effect(() => {
+    if (!finished || session.account?.anonymous !== true || hasSeen(NUDGE)) return;
+    nudge = true;
+    markSeen(NUDGE);
+  });
+
   function play(spec: QuizSpec) {
+    nudge = false;
     clearTimers();
     feedback = null;
     locked = false;
@@ -270,18 +283,17 @@
   }
 
   function onSaved(spec: QuizSpec) {
-    quizzes = saveQuiz(spec);
+    session.save(spec);
     play(spec);
   }
 
   function onDelete(spec: QuizSpec) {
-    quizzes = removeQuiz(spec.id);
+    session.remove(spec.id);
   }
 
   // Scores are untouched by an import: the file never carried any.
   function onImport(imported: QuizSpec[]) {
-    quizzes = imported;
-    saveQuizzes(imported);
+    session.replace(imported);
   }
 
   /**
@@ -401,6 +413,7 @@
           total={tally.total}
           pct={tally.pct}
           {gone}
+          {nudge}
           {collapsed}
           ontoggle={() => (collapsed = !collapsed)}
           onreplay={replay}

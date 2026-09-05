@@ -727,6 +727,7 @@ tools/             dev tools, on their own Vite roots
   coverage/        pick the ground, and the extracts that cover it cheapest
   render/          draw the tile pyramid, and upload it to R2
   rules/           what the security rules actually allow
+  e2e/             signing in across two machines, against the emulator
 firestore.rules    what the client may do, enforced by the database
 firestore.indexes.json
 web/src/lib/
@@ -740,6 +741,10 @@ web/src/lib/
   heal.ts          what an old quiz learns by playing    (pure)
   codec.ts         quizzes to and from Firestore         (pure)
   library.ts       reconciling this browser with the account (pure)
+  session.svelte.ts where quizzes and scores come from
+  cloud.ts         the only module that imports Firebase
+  firebase.ts      the project config, which is not a secret
+  Account.svelte   signing in, and the one offer to do so
   labels.ts        how much ink a name puts on screen   (pure)
   grid.ts          client half of the chunk grid        (pure)
   thin.ts          one voice per cluster                (pure)
@@ -758,6 +763,7 @@ from here because this is where the test runner is:
 npm test             # 247 tests
 npm run typecheck    # pipeline, web and the tools
 npm run test:rules   # 22 rules tests, against the Firestore emulator (needs Java)
+npm run test:e2e     # signing in across two machines (needs the emulator + a dev server)
 ```
 
 ## Known gaps
