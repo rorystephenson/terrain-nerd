@@ -16,10 +16,22 @@
     onimport: (quizzes: QuizSpec[]) => void;
     /** A link pointed at a quiz that is not there any more. */
     missing: boolean;
+    /** Brings a quiz up to date against the pool before it is published. */
+    onprepare: (quiz: QuizSpec) => Promise<QuizSpec>;
   };
 
-  let { index, quizzes, best, onbuild, onplay, onedit, ondelete, onimport, missing }: Props =
-    $props();
+  let {
+    index,
+    quizzes,
+    best,
+    onbuild,
+    onplay,
+    onedit,
+    ondelete,
+    onimport,
+    missing,
+    onprepare,
+  }: Props = $props();
 
   /** Which quiz has its share panel open, if any. */
   let sharing = $state<string | null>(null);
@@ -118,7 +130,7 @@
           <button class="icon" title="Delete" aria-label="Delete {quiz.name}" onclick={() => ondelete(quiz)}>×</button>
         </li>
         {#if sharing === quiz.id}
-          <li class="panel"><Share {quiz} onclose={() => (sharing = null)} /></li>
+          <li class="panel"><Share {quiz} {onprepare} onclose={() => (sharing = null)} /></li>
         {/if}
       {/each}
     </ul>

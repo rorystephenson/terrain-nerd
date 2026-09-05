@@ -282,6 +282,27 @@
     if (current.at !== 'play' || !current.shared) return false;
     return !quizzes.some((quiz) => quiz.id === current.spec.id);
   });
+  /**
+   * Fills in what a quiz does not know about itself, before it is frozen.
+   *
+   * A quiz migrated from an older save holds bare ids until something loads the
+   * pool for it, which normally happens the first time it is played. Publishing
+   * one in that state ships a permanent public copy with nothing to fall back
+   * on when an id moves — which is the whole thing `resolve.ts` exists for, and
+   * a published quiz is the copy that most needs it, since it is the one other
+   * people are holding.
+   *
+   * So publishing loads the pool the same way playing does. Almost always a
+   * no-op, and the once it is not, it is the once that matters.
+   */
+  async function preparePublish(spec: QuizSpec): Promise<QuizSpec> {
+    if (!index) return spec;
+    const resolved = await loadRefs(index, spec.bbox, spec.features);
+    const healed = healSpec(spec, resolved);
+    if (healed !== spec) session.save(healed);
+    return healed;
+  }
+
   function keepShared() {
     const current = screen;
     if (current.at === 'play') session.keep(current.spec);
@@ -550,6 +571,7 @@
       {quizzes}
       {best}
       missing={missingQuiz}
+      onprepare={preparePublish}
       onbuild={() => show({ at: 'build', editing: null })}
       onplay={play}
       onedit={(spec) => show({ at: 'build', editing: spec })}

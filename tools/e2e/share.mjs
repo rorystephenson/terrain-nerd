@@ -20,12 +20,18 @@ const reset = async () => {
   await fetch(`${AUTH}/emulator/v1/projects/terrain-nerd/accounts`, { method: 'DELETE' });
 };
 
+/*
+ * Deliberately bare: id and kind only, which is what a quiz saved before
+ * `FeatureRef` existed looks like after `migrateSpec` lifts it. Publishing one
+ * in that state would ship a permanent public copy with nothing to fall back on
+ * when an id moves, so the publish path has to fill it in first.
+ */
 const quiz = [{
   id: 'brenta1', name: 'The Brenta', source: 'built', createdAt: '2026-01-01T00:00:00.000Z',
   features: [
-    { id: 'peak/n26862712', kind: 'peak', name: 'Cima Tosa', at: [10.87113, 46.15652] },
-    { id: 'peak/n26862689', kind: 'peak', name: 'Cima Brenta', at: [10.89991, 46.17946] },
-    { id: 'peak/n206124143', kind: 'peak', name: 'Doss del Sabion', at: [10.80658, 46.16749] },
+    { id: 'peak/n26862712', kind: 'peak' },
+    { id: 'peak/n26862689', kind: 'peak' },
+    { id: 'peak/n206124143', kind: 'peak' },
   ],
   bbox: [10.70, 46.05, 10.95, 46.30],
 }];
@@ -74,6 +80,12 @@ console.log('published doc : version', pub.fields.version.integerValue,
             '| cells', pub.fields.cells.arrayValue.values.map((v) => v.stringValue).join(','));
 const v1 = await (await fetch(`${FS}/published/brenta1/versions/1`, ADMIN)).json();
 console.log('frozen v1     :', v1.fields ? 'stored' : 'MISSING');
+
+// The draft went in with ids alone; what got frozen must carry the names and
+// anchors that let a moved id be found again.
+const refs = pub.fields.features.arrayValue.values.map((v) => v.mapValue.fields);
+console.log('published refs:', refs.map((f) =>
+  `${f.name?.stringValue ?? 'NO NAME'}${f.at ? '' : ' NO ANCHOR'}`).join(' | '));
 
 // ---- A stranger opens the link ---------------------------------------------
 // A fresh context: different anonymous uid, nothing in localStorage.

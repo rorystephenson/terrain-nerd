@@ -20,11 +20,30 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
 
-    // Anonymous accounts are lost with site data. Playing and building are fine
-    // on one; publishing is not, because a published quiz with an author who
-    // cannot be reached is worse than no publish button.
+    /*
+     * Does this account have a real identity attached?
+     *
+     * Anonymous accounts are lost with the site data. Playing and building are
+     * fine on one; publishing is not, because a published quiz whose author
+     * cannot be reached is worse than no publish button.
+     *
+     * Asked of `identities` and **not** of `sign_in_provider`, which is the
+     * obvious field and the wrong one. `sign_in_provider` records how the
+     * current session was established and does not change when an account is
+     * linked — so someone who signed in anonymously and then signed up with
+     * Google carries a token that still says `anonymous`, on an account that is
+     * anything but, until they next sign in from scratch. That is the ordinary
+     * path through this app rather than an edge case, and it made publishing
+     * impossible for exactly the people entitled to do it.
+     *
+     * `identities` is a map of the providers actually on the account, so it is
+     * empty for an anonymous one and filled the moment a link succeeds. Guarded
+     * for its own absence, since not every token carries it.
+     */
     function isNamed() {
-      return signedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+      return signedIn()
+        && 'identities' in request.auth.token.firebase
+        && request.auth.token.firebase.identities.keys().size() > 0;
     }
 
     function touched() {

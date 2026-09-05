@@ -231,7 +231,19 @@ rather than quietly diverging from it.
 
 Publishing needs a real account; playing, building and keeping do not. An
 anonymous account is lost with the site data, and a published quiz whose author
-cannot be reached is worse than no publish button.
+cannot be reached is worse than no publish button. The rules ask that of the
+token's `identities` rather than its `sign_in_provider`: the latter records how
+the session began and does not change when an account is linked, so someone who
+played anonymously and then signed up carries a token that still says
+`anonymous` on an account that is anything but — which is the ordinary path
+through this app, not an edge case.
+
+Publishing also brings a quiz up to date against the pool first. A quiz saved
+before features carried their own names holds bare ids until something loads
+the pool for it, and freezing one in that state ships a permanent public copy
+with nothing to fall back on when an id moves — see [Sharing](#sharing-a-quiz)
+above and `resolve.ts`. Almost always a no-op; the once it is not is the once
+that matters.
 
 **Popularity counts people, not rounds.** Finishing a quiz writes a marker
 document you can write once and can never delete, in the same commit as the

@@ -23,13 +23,41 @@ import { doc, getDoc, setDoc, updateDoc, deleteDoc, increment, writeBatch, serve
 
 let env: RulesTestEnvironment;
 
-/** A signed-up account. */
-const named = (uid: string) =>
-  env.authenticatedContext(uid, { firebase: { sign_in_provider: 'google.com' } }).firestore();
+/*
+ * Three token shapes, because the difference between them is a bug this suite
+ * once waved through.
+ *
+ * `sign_in_provider` says how the *session* began and never changes afterwards.
+ * `identities` says which providers are on the *account*. Linking Google to an
+ * anonymous account moves the second and not the first — so `linked` below is
+ * what almost every real signed-up user actually carries, and asserting only
+ * `named` is how a rule that refused all of them passed its tests.
+ */
 
-/** Someone who has never signed up. Plays, builds, keeps progress; cannot publish. */
+/** Signed in with Google from the start. */
+const named = (uid: string) =>
+  env
+    .authenticatedContext(uid, {
+      firebase: { sign_in_provider: 'google.com', identities: { 'google.com': [uid] } },
+    })
+    .firestore();
+
+/**
+ * Started anonymously and then signed up — the ordinary path through this app.
+ * The session is still `anonymous`; the account is not.
+ */
+const linked = (uid: string) =>
+  env
+    .authenticatedContext(uid, {
+      firebase: { sign_in_provider: 'anonymous', identities: { 'google.com': [uid] } },
+    })
+    .firestore();
+
+/** Never signed up. Plays, builds, keeps progress; cannot publish. */
 const anon = (uid: string) =>
-  env.authenticatedContext(uid, { firebase: { sign_in_provider: 'anonymous' } }).firestore();
+  env
+    .authenticatedContext(uid, { firebase: { sign_in_provider: 'anonymous', identities: {} } })
+    .firestore();
 
 const quizBody = (over: Record<string, unknown> = {}) => ({
   schema: 1,
@@ -130,6 +158,23 @@ describe('publishing', () => {
   test('needs a real account, not an anonymous one', async () => {
     await assertFails(setDoc(doc(anon('ghost'), 'published/q1'), publishedBody('ghost')));
     await assertSucceeds(setDoc(doc(named('alice'), 'published/q1'), publishedBody('alice')));
+  });
+
+  test('works for someone who signed up *after* playing anonymously', async () => {
+    // The path nearly everyone takes, and the one that was broken in
+    // production while this suite was green: the token still says the session
+    // began anonymously, because it did, and the account has a Google identity
+    // on it, because they signed up. Gating on the former refuses the person
+    // who is entitled to publish and nobody else.
+    await assertSucceeds(setDoc(doc(linked('alice'), 'published/q1'), publishedBody('alice')));
+  });
+
+  test('a linked account can republish and unpublish its own quiz', async () => {
+    await assertSucceeds(setDoc(doc(linked('alice'), 'published/q1'), publishedBody('alice')));
+    await assertSucceeds(
+      setDoc(doc(linked('alice'), 'published/q1'), publishedBody('alice', { version: 2 })),
+    );
+    await assertSucceeds(deleteDoc(doc(linked('alice'), 'published/q1')));
   });
 
   test('is world-readable once published', async () => {
