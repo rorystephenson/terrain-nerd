@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Account from './Account.svelte';
+  import Nav from './Nav.svelte';
   import Share from './Share.svelte';
   import type { PoolIndex, QuizSpec } from './types.ts';
 
@@ -37,125 +37,207 @@
 </script>
 
 <div class="picker">
-  <header>
-    <h1>Terrain Nerd</h1>
-    <p class="lede">Learn the terrain you fly</p>
-    <p class="hint">
-      Build a quiz for an area you care about, then replay it until you know it. Every round
-      asks the same set in a new order. Four tries a question, then you are shown the answer
-      and have to go and click it.
-    </p>
-    <Account />
-  </header>
+  <Nav onhome={null} {onbuild} {onbrowse} />
 
-  {#if missing}
-    <p class="missing">
-      That link does not lead anywhere any more — the quiz may have been unpublished. Everything
-      below is still yours.
-    </p>
-  {/if}
+  <!--
+    The hero is a frame of the app, not a picture of one: `tools/hero/capture.mjs`
+    photographs a real first question over real terrain. The map render is the
+    most characteristic thing this app owns, and until now the home page was the
+    one screen that showed none of it.
+  -->
+  <section class="hero">
+    <picture>
+      <source media="(max-width: 40rem)" srcset="/hero/hero-narrow.webp" />
+      <source srcset="/hero/hero.webp 1600w, /hero/hero@2x.webp 3200w" />
+      <img src="/hero/hero.webp" alt="" width="1600" height="827" fetchpriority="high" />
+    </picture>
 
-  <div class="start">
-    <button class="build" onclick={onbuild}>+ Build a quiz</button>
-    <button class="browse" onclick={onbrowse}>Browse shared quizzes</button>
-  </div>
+    <div class="pitch">
+      <h1>Learn the names of natural landmarks so you can tell others where you’ve been!</h1>
+      <div class="start">
+        <button class="build" onclick={onbuild}>Build a quiz</button>
+        <button class="browse" onclick={onbrowse}>Browse shared quizzes</button>
+      </div>
+    </div>
+  </section>
 
-  {#if quizzes.length > 0}
-    <h2>Your quizzes</h2>
-    <ul class="quizzes">
-      {#each quizzes as quiz (quiz.id)}
-        <li>
-          <button class="row" onclick={() => onplay(quiz)}>
-            <span class="name">{quiz.name}</span>
-            <span class="meta">
-              {#if quiz.source === 'shared'}<span class="tag">shared</span>{/if}
-              {#if best[quiz.id] !== undefined}
-                <span class="best" class:perfect={best[quiz.id] === 100}>{best[quiz.id]}%</span>
-              {/if}
-              <span class="count">{quiz.features.length}</span>
-            </span>
-          </button>
-          <button
-            class="icon"
-            class:on={sharing === quiz.id}
-            title="Share"
-            aria-label="Share {quiz.name}"
-            onclick={() => (sharing = sharing === quiz.id ? null : quiz.id)}>⇪</button>
-          <button class="icon" title="Edit" aria-label="Edit {quiz.name}" onclick={() => onedit(quiz)}>✎</button>
-          <button class="icon" title="Delete" aria-label="Delete {quiz.name}" onclick={() => ondelete(quiz)}>×</button>
-        </li>
-        {#if sharing === quiz.id}
-          <li class="panel"><Share {quiz} onclose={() => (sharing = null)} /></li>
-        {/if}
-      {/each}
-    </ul>
-  {:else}
-    <p class="empty">
-      No quizzes yet. Build one for the area you fly most — pick the peaks and valleys you
-      actually want to know, and skip the rest.
-    </p>
-  {/if}
-
-  <!-- Holds its line before the index arrives, so nothing above it jumps. -->
-  <footer>
-    {#if index}
-      {total.toLocaleString()} named features · {index.attribution} · data {index.generatedAt}
+  <div class="body">
+    {#if missing}
+      <p class="missing">
+        That link does not lead anywhere any more — the quiz may have been unpublished.
+        Everything below is still yours.
+      </p>
     {/if}
-  </footer>
+
+    {#if quizzes.length > 0}
+      <h2>Your quizzes</h2>
+      <ul class="quizzes">
+        {#each quizzes as quiz (quiz.id)}
+          <li>
+            <button class="row" onclick={() => onplay(quiz)}>
+              <span class="name">{quiz.name}</span>
+              <span class="meta">
+                {#if quiz.source === 'shared'}<span class="tag">shared</span>{/if}
+                {#if best[quiz.id] !== undefined}
+                  <span class="best" class:perfect={best[quiz.id] === 100}>{best[quiz.id]}%</span>
+                {/if}
+                <span class="count">{quiz.features.length}</span>
+              </span>
+            </button>
+            <!--
+              Drawn, not typed. These were `⇪ ✎ ×` before, which render at three
+              different sizes across platforms and reach a screen reader as
+              punctuation.
+            -->
+            <button
+              class="icon"
+              class:on={sharing === quiz.id}
+              title="Share"
+              aria-label="Share {quiz.name}"
+              onclick={() => (sharing = sharing === quiz.id ? null : quiz.id)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 10.5V2m0 0L5 5m3-3 3 3" />
+                <path d="M3 9.5v3.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V9.5" />
+              </svg>
+            </button>
+            <button class="icon" title="Edit" aria-label="Edit {quiz.name}" onclick={() => onedit(quiz)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M11.5 2.5 13.5 4.5 5.5 12.5 2.5 13.5 3.5 10.5Z" />
+              </svg>
+            </button>
+            <button class="icon" title="Delete" aria-label="Delete {quiz.name}" onclick={() => ondelete(quiz)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </li>
+          {#if sharing === quiz.id}
+            <li class="panel"><Share {quiz} onclose={() => (sharing = null)} /></li>
+          {/if}
+        {/each}
+      </ul>
+    {:else}
+      <p class="empty">
+        No quizzes yet. Build one for the area you fly most — pick the peaks and valleys you
+        actually want to know, and skip the rest.
+      </p>
+    {/if}
+
+    <!-- Holds its line before the index arrives, so nothing above it jumps. -->
+    <footer>
+      {#if index}
+        {total.toLocaleString()} named features · {index.attribution} · data {index.generatedAt}
+      {/if}
+    </footer>
+  </div>
 </div>
 
 <style>
   .picker {
+    /* One measure and one gutter for the whole screen: the hero copy and the
+       quiz rows below it have to start on the same vertical, or the page has no
+       spine and the image reads as pasted on. */
+    --measure: 44rem;
+    --gutter: clamp(1.1rem, 4vw, 2rem);
+
     position: absolute;
     inset: 0;
     overflow-y: auto;
-    padding: clamp(1.25rem, 4vw, 2.5rem) 1.25rem 2rem;
-    max-width: 44rem;
-    margin: 0 auto;
-  }
-  header { text-align: center; }
-  h1 { margin: 0; font-size: clamp(2rem, 7vw, 2.8rem); letter-spacing: -0.02em; }
-  .lede { margin: 0.2rem 0 0; font-size: 1.1rem; color: var(--muted); }
-  .hint {
-    margin: 0.75rem auto 0;
-    max-width: 30rem;
-    color: var(--muted);
-    line-height: 1.5;
-    font-size: 0.95rem;
   }
 
-  .start { display: flex; gap: 0.5rem; margin: 1.75rem 0 0; }
-  .browse {
-    padding: 0.85rem 1rem;
+  /*
+   * Full bleed, and deliberately taller than a banner: the terrain is the
+   * argument for the product, so it gets the room to be looked at rather than
+   * skimmed past. Capped so it never pushes the quiz list off a laptop screen.
+   */
+  .hero {
+    position: relative;
+    background: #dfe3d8;
+  }
+  .hero img {
+    display: block;
+    width: 100%;
+    height: clamp(19rem, 48vh, 28rem);
+    object-fit: cover;
+    /* Where the capture is most legible: ridges and passes, not the flat valley. */
+    object-position: 32% 38%;
+  }
+
+  /*
+   * The copy sits on the image, over a scrim that resolves into the page ground
+   * rather than stopping at an edge — so the terrain reads as the top of the
+   * page rather than as a picture pasted onto it.
+   */
+  .pitch {
+    position: absolute;
+    inset: auto 0 0;
+    padding: 5rem var(--gutter) clamp(1.3rem, 2.5vw, 1.8rem);
+    background: linear-gradient(
+      to bottom,
+      rgba(236, 238, 232, 0) 0%,
+      rgba(236, 238, 232, 0.5) 34%,
+      rgba(236, 238, 232, 0.88) 62%,
+      var(--paper) 88%
+    );
+  }
+  /* Same width the list rows get, centred the same way, so both share an edge. */
+  .pitch > * {
+    max-width: calc(var(--measure) - 2 * var(--gutter));
+    margin-inline: auto;
+  }
+
+  /*
+   * Lettered the way the map letters a summit: ink in a paper halo, no plate.
+   * That convention is already in `styles.css` for `.map-place`, and borrowing
+   * it here is what keeps the headline legible without washing the terrain out
+   * under a heavier scrim — the type sits *on* the ground rather than on a bar
+   * laid over it.
+   */
+  h1 {
+    margin: 0;
+    max-width: 22ch;
+    font-size: clamp(1.9rem, 5.2vw, 3.1rem);
+    font-weight: 700;
+    font-stretch: 84%;
+    line-height: 1.06;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    paint-order: stroke fill;
+    -webkit-text-stroke: 0.1em rgba(236, 238, 232, 0.88);
+  }
+
+  .start { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.2rem; }
+  .build {
+    padding: 0.8rem 1.4rem;
     font: inherit;
-    color: #1d232b;
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.15);
-    border-radius: 10px;
+    font-weight: 650;
+    color: var(--surface);
+    background: var(--accent);
+    border: 0;
+    border-radius: var(--r-md);
     cursor: pointer;
-    white-space: nowrap;
+  }
+  .browse {
+    padding: 0.8rem 1.1rem;
+    font: inherit;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-md);
+    cursor: pointer;
   }
   .browse:hover { border-color: var(--accent); }
 
-  .build {
-    flex: 1;
-    margin: 0;
-    padding: 0.85rem;
-    font: inherit;
-    font-weight: 650;
-    color: #fff;
-    background: var(--accent);
-    border: 0;
-    border-radius: 10px;
-    cursor: pointer;
+  .body {
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: 1.5rem var(--gutter) 2.5rem;
   }
 
   h2 {
-    margin: 1.75rem 0 0.6rem;
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    margin: 0 0 0.6rem;
+    font-size: 0.95rem;
+    font-weight: 650;
     color: var(--muted);
   }
 
@@ -165,11 +247,11 @@
   .tag {
     font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--muted); padding: 0.12rem 0.4rem;
-    background: rgba(0, 0, 0, 0.06); border-radius: 20px;
+    background: rgba(0, 0, 0, 0.06); border-radius: var(--r-pill);
   }
   .missing {
-    margin: 1rem 0 0; padding: 0.7rem 0.85rem; font-size: 0.85rem; line-height: 1.5;
-    color: var(--muted); background: rgba(0, 0, 0, 0.04); border-radius: 9px;
+    margin: 0 0 1rem; padding: 0.7rem 0.85rem; font-size: 0.85rem; line-height: 1.5;
+    color: var(--muted); background: var(--quiet); border-radius: var(--r);
   }
   .row {
     flex: 1;
@@ -180,9 +262,9 @@
     padding: 0.8rem 0.9rem;
     font: inherit;
     text-align: left;
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r);
     cursor: pointer;
   }
   .row:hover { border-color: var(--accent); background: #fbfdfb; }
@@ -193,41 +275,59 @@
     font-size: 0.75rem;
     font-weight: 700;
     padding: 0.12rem 0.45rem;
-    border-radius: 20px;
-    color: #fff;
+    border-radius: var(--r-pill);
+    color: var(--surface);
     background: var(--muted);
     font-variant-numeric: tabular-nums;
   }
   .best.perfect { background: var(--right); }
 
   .icon {
+    display: grid;
+    place-items: center;
     width: 2.2rem;
-    font: inherit;
-    font-size: 1rem;
     color: var(--muted);
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r);
     cursor: pointer;
   }
-  .icon:hover { color: #1d232b; border-color: rgba(0, 0, 0, 0.25); }
-  .icon.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .icon svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .icon:hover { color: var(--ink); border-color: var(--hairline-strong); }
+  .icon.on { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+
+  /*
+   * On a phone the three icon buttons leave the name about 250px, which broke
+   * every real quiz name across three lines. The meta drops under the name
+   * instead: the name is what you are looking for, and the score and the count
+   * are what you check once you have found it.
+   */
+  @media (max-width: 30rem) {
+    .row { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
+    .icon { width: 2rem; }
+  }
 
   .empty {
-    margin: 1.5rem 0 0;
+    margin: 0;
     padding: 1.25rem;
     color: var(--muted);
     text-align: center;
     line-height: 1.55;
     background: rgba(0, 0, 0, 0.03);
-    border-radius: 10px;
+    border-radius: var(--r-md);
   }
-
 
   footer {
     min-height: 1lh;
     margin-top: 1.75rem;
-    text-align: center;
     font-size: 0.75rem;
     color: var(--muted);
   }

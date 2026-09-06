@@ -4,10 +4,11 @@
   type Props = {
     /**
      * `nudge` is the same control with a reason attached, shown once after a
-     * finished round. Same code path, so there is only ever one sign-in button
-     * in this app however many places offer it.
+     * finished round; `nav` is the same control with the reason dropped, because
+     * the bar has no room for a sentence. Same code path, so there is only ever
+     * one sign-in button in this app however many places offer it.
      */
-    variant?: 'inline' | 'nudge';
+    variant?: 'inline' | 'nudge' | 'nav';
   };
   let { variant = 'inline' }: Props = $props();
 
@@ -42,8 +43,12 @@
     The one moment worth interrupting for. Moving somebody's work into an
     account they had already made on another machine is not a thing to do
     quietly, and it is also not a thing to do without saying what it will do.
+
+    Which is why, in the nav, it does not render in the nav: a decision this
+    size squeezed into a bar would be a decision made by accident. It drops out
+    of the bar and hangs under it instead, at the width it needs.
   -->
-  <div class="offer">
+  <div class="offer" class:offer--hanging={variant === 'nav'}>
     <p>
       You already had an account. Keep the {offered.length}
       {offered.length === 1 ? 'quiz' : 'quizzes'} made on this device as well?
@@ -56,6 +61,17 @@
       <button onclick={() => session.declineOffered()}>Not now</button>
     </div>
   </div>
+{:else if variant === 'nav'}
+  {#if account?.anonymous}
+    <button class="signin" onclick={signIn} disabled={busy}>
+      {busy ? 'Signing in…' : 'Sign in'}
+    </button>
+  {:else if account}
+    <span class="whoami">
+      <span class="who who--nav">{account.name ?? 'Signed in'}</span>
+      <button class="link" onclick={() => session.signOut()}>Sign out</button>
+    </span>
+  {/if}
 {:else if account?.anonymous && variant === 'nudge'}
   <p class="nudge">
     Your scores are saved on this device.
@@ -78,7 +94,7 @@
   </p>
 {/if}
 
-{#if note}<p class="note">{note}</p>{/if}
+{#if note}<p class="note" class:note--nav={variant === 'nav'}>{note}</p>{/if}
 
 <style>
   .line {
@@ -104,9 +120,60 @@
   .offer {
     margin: 1rem 0 0;
     padding: 0.9rem 1rem;
-    background: #fff;
+    background: var(--surface);
     border: 1px solid var(--accent);
-    border-radius: 10px;
+    border-radius: var(--r-md);
+  }
+  /* Out of the bar's flex row and under it, still inside the nav's own box. */
+  .offer--hanging {
+    position: absolute;
+    top: 100%;
+    right: clamp(0.9rem, 3vw, 1.5rem);
+    z-index: 7;
+    width: min(22rem, calc(100vw - 2rem));
+    margin: 0.4rem 0 0;
+    box-shadow: var(--lift-panel);
+  }
+
+  /* Compact enough for the bar, and still a real target on a phone. */
+  .signin {
+    padding: 0.38rem 0.8rem;
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--surface);
+    background: var(--accent);
+    border: 0;
+    border-radius: var(--r-pill);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .signin:disabled { opacity: 0.6; cursor: default; }
+
+  .whoami {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.86rem;
+    color: var(--muted);
+  }
+  .who--nav {
+    display: block;
+    margin-right: 0;
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.86rem;
+  }
+  .note--nav {
+    position: absolute;
+    top: 100%;
+    right: clamp(0.9rem, 3vw, 1.5rem);
+    margin: 0.35rem 0 0;
+    padding: 0.35rem 0.7rem;
+    background: var(--glass);
+    border-radius: var(--r-pill);
   }
   .offer p { margin: 0; font-size: 0.9rem; line-height: 1.5; }
   .offer ul {

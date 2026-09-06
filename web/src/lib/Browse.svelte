@@ -1,5 +1,6 @@
 <script lang="ts">
   import BrowseMap from './BrowseMap.svelte';
+  import Nav from './Nav.svelte';
   import { spanKm } from './discover.ts';
   import { session } from './session.svelte.ts';
   import type { Published } from './codec.ts';
@@ -8,12 +9,13 @@
   type Props = {
     onplay: (published: Published) => void;
     onback: () => void;
+    onbuild: () => void;
     /** Your own quizzes, so a row can say you already have it. */
     mine: QuizSpec[];
     /** The pool, for the map: it says which ground the basemap covers. */
     index: PoolIndex;
   };
-  let { onplay, onback, mine, index }: Props = $props();
+  let { onplay, onback, onbuild, mine, index }: Props = $props();
 
   /**
    * `map` is a view of the same catalogue, not a fourth query.
@@ -73,69 +75,76 @@
 </script>
 
 <div class="browse" class:browse--map={tab === 'map'}>
-  <header>
-    <button class="back" onclick={onback}>← Your quizzes</button>
+  <Nav onhome={onback} {onbuild} onbrowse={null} />
+
+  <div class="sheet">
     <h1>Quizzes people have shared</h1>
-  </header>
 
-  <nav>
-    <button class:on={tab === 'map'} onclick={() => (tab = 'map')}>Map</button>
-    <button class:on={tab === 'popular'} onclick={() => (tab = 'popular')}>Most played</button>
-    <button class:on={tab === 'new'} onclick={() => (tab = 'new')}>New</button>
-    {#if hasGround}
-      <button class:on={tab === 'near'} onclick={() => (tab = 'near')}>Your ground</button>
-    {/if}
-  </nav>
-
-  {#if tab === 'map'}
-    <BrowseMap {index} {mine} {onplay} />
-  {:else if loading}
-    <p class="muted">Looking…</p>
-  {:else if failed}
-    <p class="muted">Could not reach the quiz list. Yours are all still here.</p>
-  {:else if found.length === 0}
-    <p class="muted">
-      {#if tab === 'near'}
-        Nothing published over the ground your own quizzes cover — yet.
-      {:else}
-        Nothing published yet. Build a quiz and share it, and it will be the first.
+    <nav class="tabs">
+      <button class:on={tab === 'map'} onclick={() => (tab = 'map')}>Map</button>
+      <button class:on={tab === 'popular'} onclick={() => (tab = 'popular')}>Most played</button>
+      <button class:on={tab === 'new'} onclick={() => (tab = 'new')}>New</button>
+      {#if hasGround}
+        <button class:on={tab === 'near'} onclick={() => (tab = 'near')}>Your ground</button>
       {/if}
-    </p>
-  {:else}
-    <ul>
-      {#each found as quiz (quiz.spec.id)}
-        <li>
-          <button class="row" onclick={() => onplay(quiz)}>
-            <span class="name">
-              {quiz.spec.name}
-              {#if held.has(quiz.spec.id)}<span class="tag">yours</span>{/if}
-            </span>
-            <span class="meta">
-              <span class="by">{quiz.ownerName}</span>
-              <span class="count">{summary(quiz)}</span>
-            </span>
-          </button>
-        </li>
-      {/each}
-    </ul>
-    <p class="note">
-      <!--
-        Said plainly because the number is easy to read as rounds played, which
-        it deliberately is not: replaying a quiz all afternoon never moves it.
-      -->
-      Player counts are people who have finished a round, not rounds.
-    </p>
-  {/if}
+    </nav>
+
+    {#if tab === 'map'}
+      <BrowseMap {index} {mine} {onplay} />
+    {:else if loading}
+      <p class="muted">Looking…</p>
+    {:else if failed}
+      <p class="muted">Could not reach the quiz list. Yours are all still here.</p>
+    {:else if found.length === 0}
+      <p class="muted">
+        {#if tab === 'near'}
+          Nothing published over the ground your own quizzes cover — yet.
+        {:else}
+          Nothing published yet. Build a quiz and share it, and it will be the first.
+        {/if}
+      </p>
+    {:else}
+      <ul>
+        {#each found as quiz (quiz.spec.id)}
+          <li>
+            <button class="row" onclick={() => onplay(quiz)}>
+              <span class="name">
+                {quiz.spec.name}
+                {#if held.has(quiz.spec.id)}<span class="tag">yours</span>{/if}
+              </span>
+              <span class="meta">
+                <span class="by">{quiz.ownerName}</span>
+                <span class="count">{summary(quiz)}</span>
+              </span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+      <p class="note">
+        <!--
+          Said plainly because the number is easy to read as rounds played, which
+          it deliberately is not: replaying a quiz all afternoon never moves it.
+        -->
+        Player counts are people who have finished a round, not rounds.
+      </p>
+    {/if}
+  </div>
 </div>
 
 <style>
+  /*
+   * The bar spans the screen; the reading column is inside it. Before the nav
+   * existed this element was both, and the two cannot be the same box any more.
+   */
   .browse {
     position: absolute;
     inset: 0;
     overflow-y: auto;
-    padding: clamp(1.25rem, 4vw, 2.5rem) 1.25rem 2rem;
+  }
+  .sheet {
     max-width: 44rem;
     margin: 0 auto;
+    padding: clamp(1.1rem, 3vw, 1.75rem) clamp(1.1rem, 4vw, 2rem) 2rem;
   }
   /*
    * The map fills what is left rather than scrolling: a map you have to scroll
@@ -146,35 +155,46 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .browse--map .sheet {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    /* A flex item with auto side margins stops stretching and shrinks to its
+       content, which collapsed the map to a column. The cap still applies. */
+    width: 100%;
+    /* Without this the map's own height wins and the column overflows. */
+    min-height: 0;
+    overflow: hidden;
     max-width: 60rem;
     padding-bottom: 1.25rem;
   }
-  header { margin-bottom: 1.25rem; }
-  .back {
-    font: inherit;
-    font-size: 0.85rem;
-    color: var(--muted);
-    background: none;
-    border: 0;
-    padding: 0;
-    cursor: pointer;
+  h1 {
+    margin: 0;
+    font-size: clamp(1.4rem, 4vw, 1.8rem);
+    font-weight: 700;
+    font-stretch: 88%;
+    letter-spacing: -0.015em;
   }
-  .back:hover { color: #1d232b; }
-  h1 { margin: 0.5rem 0 0; font-size: clamp(1.4rem, 4vw, 1.8rem); letter-spacing: -0.02em; }
 
-  nav { display: flex; gap: 0.4rem; margin-bottom: 1rem; }
-  nav button {
+  .tabs { display: flex; gap: 0.4rem; margin: 1rem 0; }
+  .tabs button {
     flex: 1;
     padding: 0.5rem;
     font: inherit;
     font-size: 0.85rem;
     color: var(--muted);
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
     cursor: pointer;
   }
-  nav button.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 650; }
+  .tabs button.on {
+    color: var(--surface);
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 650;
+  }
 
   ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
   .row {
@@ -186,9 +206,9 @@
     padding: 0.8rem 0.9rem;
     font: inherit;
     text-align: left;
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r);
     cursor: pointer;
   }
   .row:hover { border-color: var(--accent); background: #fbfdfb; }
@@ -202,10 +222,10 @@
     color: var(--muted);
     padding: 0.12rem 0.4rem;
     background: rgba(0, 0, 0, 0.06);
-    border-radius: 20px;
+    border-radius: var(--r-pill);
   }
   .meta { display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; }
-  .by { font-size: 0.8rem; color: #1d232b; }
+  .by { font-size: 0.8rem; color: var(--ink); }
   .count { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
   .muted {
@@ -215,7 +235,7 @@
     text-align: center;
     line-height: 1.55;
     background: rgba(0, 0, 0, 0.03);
-    border-radius: 10px;
+    border-radius: var(--r-md);
   }
   .note { margin: 0.9rem 0 0; font-size: 0.78rem; color: var(--muted); text-align: center; }
 </style>

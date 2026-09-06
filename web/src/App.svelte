@@ -472,6 +472,7 @@
       {index}
       mine={quizzes}
       onback={toList}
+      onbuild={() => show({ at: 'build', editing: null })}
       onplay={(published) => play(published.spec, published)}
     />
   {:else if screen.at === 'build'}
@@ -575,7 +576,13 @@
     gap: 0.4rem;
     padding: 1.5rem;
   }
-  h1 { margin: 0; font-size: clamp(2rem, 7vw, 3rem); letter-spacing: -0.02em; }
+  h1 {
+    margin: 0;
+    font-size: clamp(2rem, 7vw, 3rem);
+    font-weight: 700;
+    font-stretch: 84%;
+    letter-spacing: -0.015em;
+  }
   .hint { margin: 0.5rem 0 0; max-width: 28rem; color: var(--muted); line-height: 1.5; }
   .error { color: var(--wrong); max-width: 30rem; }
   code { background: rgba(0, 0, 0, 0.07); padding: 0.1em 0.35em; border-radius: 4px; }

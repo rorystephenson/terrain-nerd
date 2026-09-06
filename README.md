@@ -857,6 +857,63 @@ None of this data is ever mutated in place, only reassigned, so `$state.raw` in
 `App.svelte` and `Builder.svelte` is both correct and the whole fix — the same
 pan now runs with zero long tasks and a 33 ms worst frame.
 
+## The chrome
+
+The map was designed and the rest of the app was not: a measured hypsometric
+ramp and printed-topo lettering behind a home page of centred `system-ui` on
+flat grey. So the chrome now takes its cues from the map rather than inventing a
+second visual language beside it.
+
+### Two font stacks, and the map's is load-bearing
+
+`styles.css` declares `--font-ui` and `--font-map`, and they are not
+interchangeable.
+
+`--font-map` is the system stack the map's labels have always used, and it has
+to stay that way. Names on the map are HTML markers, and *how many* of them get
+drawn is decided offline, against a fitted character width in `labels.ts`:
+
+```ts
+export const LABEL_BOX = { charWidth: 7.2, padding: 14, height: 20, gap: 4 };
+```
+
+That number is duplicated in `pipeline/src/placeZoom.ts`, pinned by
+`placeZoom.test.ts`, and consumed by the thinning pass in `thin.ts`. Letting a
+new font reach `.map-label` and `.map-place` would change every label's real
+width without changing the number the thinning was computed from — names would
+collide, or quietly disappear, and every test would still pass. So those two
+classes set `font-family: var(--font-map)` explicitly. Changing the map's
+lettering is possible, but it means re-fitting `LABEL_BOX`, updating its
+duplicate, and re-running the offline pass — not a CSS edit.
+
+`--font-ui` is Archivo, for everything else. It is there for its width axis:
+headings and the wordmark condense the way lettering on a map sheet does, while
+body text stays at normal width.
+
+### The hero is a photograph of the app
+
+`tools/hero/capture.mjs` drives the real quiz screen and screenshots it, so the
+home page opens onto an actual frame of the product rather than a drawing of
+one. It seeds a quiz over Adamello–Brenta out of `pipeline/cache/data`, opens it,
+and captures the first question — a state that needs no clicks to reach, which
+is what makes the capture deterministic. The prompt bar is cropped off, because
+under the nav it would read as a second white bar rather than as chrome over a
+map; the headline says what the bar would have said.
+
+Chromium encodes the WebP, so the script needs nothing installed that Playwright
+does not already bring. Output goes to `web/public/hero/` — `public/`, not
+`src/assets/`, because the Open Graph tag needs a URL the bundler has not
+hashed. Re-run it whenever the basemap or the map's own type changes:
+
+```bash
+npm run dev          # in one terminal
+npm run capture:hero
+```
+
+The headline itself is set the way the map sets a summit: ink in a paper halo,
+no plate. That is the same convention `.map-place` uses, and it is what lets the
+type sit on the terrain without a heavy scrim washing the ground out under it.
+
 ## Layout
 
 ```
@@ -881,6 +938,7 @@ pipeline/          run on demand, never at build time
 tools/             dev tools, on their own Vite roots
   coverage/        pick the ground, and the extracts that cover it cheapest
   render/          draw the tile pyramid
+  hero/            photograph the app for the home page
   upload/          r2.mjs, and the two things that go in the bucket
   rules/           what the security rules actually allow
   e2e/             signing in, and sharing, against the emulator
@@ -900,6 +958,8 @@ web/src/lib/
   cloud.ts         the only module that imports Firebase
   firebase.ts      the project config, which is not a secret
   Account.svelte   signing in, and the one offer to do so
+  Nav.svelte       the bar on the two screens that are not a map
+  QuizList.svelte  the home screen, and the hero
   Share.svelte     publishing a quiz, and the link it gets
   Browse.svelte    what other people have published
   BrowseMap.svelte the same, on the ground it is about
@@ -925,6 +985,7 @@ npm run test:rules   # 25 rules tests, against the Firestore emulator (needs Jav
 npm run test:e2e     # signing in across two machines (needs the emulator + a dev server)
 npm run test:share   # publishing and opening a link  (likewise)
 npm run test:browse  # the browse map, on a real projection (likewise)
+npm run capture:hero # re-photograph the home page hero (needs a dev server)
 ```
 
 ## Known gaps
