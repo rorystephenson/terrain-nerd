@@ -34,6 +34,57 @@
 
   /** Which quiz has its share panel open, if any. */
   let sharing = $state<string | null>(null);
+
+  /** Which row has its actions menu open. One at a time, by construction. */
+  let menuFor = $state<string | null>(null);
+  let menuEl = $state<HTMLElement | null>(null);
+  /** The button the open menu belongs to, so Escape can hand focus back to it. */
+  let trigger: HTMLButtonElement | null = null;
+
+  function openMenu(quizId: string, event: MouseEvent) {
+    trigger = event.currentTarget as HTMLButtonElement;
+    menuFor = menuFor === quizId ? null : quizId;
+  }
+
+  function closeMenu(returnFocus = false) {
+    menuFor = null;
+    if (returnFocus) trigger?.focus();
+    trigger = null;
+  }
+
+  /** Opening the menu puts the keyboard in it; there is nowhere else to be. */
+  $effect(() => {
+    menuEl?.querySelector('button')?.focus();
+  });
+
+  $effect(() => {
+    if (!menuFor) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      // The trigger toggles itself, so leave it alone and let its own click run.
+      if (menuEl?.contains(target as Node) || target?.closest('.more')) return;
+      closeMenu();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeMenu(true);
+    };
+    addEventListener('pointerdown', onDown);
+    addEventListener('keydown', onKey);
+    return () => {
+      removeEventListener('pointerdown', onDown);
+      removeEventListener('keydown', onKey);
+    };
+  });
+
+  /** Up and down walk the menu, which is what a menu is expected to do. */
+  function onMenuKey(event: KeyboardEvent) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const items = [...(menuEl?.querySelectorAll('button') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    items[(at + step + items.length) % items.length]?.focus();
+  }
 </script>
 
 <div class="picker">
@@ -74,42 +125,76 @@
       <ul class="quizzes">
         {#each quizzes as quiz (quiz.id)}
           <li>
-            <button class="row" onclick={() => onplay(quiz)}>
-              <span class="name">{quiz.name}</span>
-              <span class="meta">
-                {#if quiz.source === 'shared'}<span class="tag">shared</span>{/if}
-                {#if best[quiz.id] !== undefined}
-                  <span class="best" class:perfect={best[quiz.id] === 100}>{best[quiz.id]}%</span>
-                {/if}
-                <span class="count">{quiz.features.length}</span>
-              </span>
-            </button>
-            <!--
-              Drawn, not typed. These were `⇪ ✎ ×` before, which render at three
-              different sizes across platforms and reach a screen reader as
-              punctuation.
-            -->
-            <button
-              class="icon"
-              class:on={sharing === quiz.id}
-              title="Share"
-              aria-label="Share {quiz.name}"
-              onclick={() => (sharing = sharing === quiz.id ? null : quiz.id)}>
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M8 10.5V2m0 0L5 5m3-3 3 3" />
-                <path d="M3 9.5v3.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V9.5" />
-              </svg>
-            </button>
-            <button class="icon" title="Edit" aria-label="Edit {quiz.name}" onclick={() => onedit(quiz)}>
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M11.5 2.5 13.5 4.5 5.5 12.5 2.5 13.5 3.5 10.5Z" />
-              </svg>
-            </button>
-            <button class="icon" title="Delete" aria-label="Delete {quiz.name}" onclick={() => ondelete(quiz)}>
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" />
-              </svg>
-            </button>
+            <div class="row" class:row--menu={menuFor === quiz.id}>
+              <button class="open" onclick={() => onplay(quiz)}>
+                <span class="name">{quiz.name}</span>
+                <span class="meta">
+                  {#if quiz.source === 'shared'}<span class="tag">shared</span>{/if}
+                  {#if best[quiz.id] !== undefined}
+                    <span class="best" class:perfect={best[quiz.id] === 100}>{best[quiz.id]}%</span>
+                  {/if}
+                  <span class="count">{quiz.features.length}</span>
+                </span>
+              </button>
+              <button
+                class="more"
+                aria-haspopup="menu"
+                aria-expanded={menuFor === quiz.id}
+                aria-label="Actions for {quiz.name}"
+                onclick={(event) => openMenu(quiz.id, event)}>
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="3.2" r="1.35" />
+                  <circle cx="8" cy="8" r="1.35" />
+                  <circle cx="8" cy="12.8" r="1.35" />
+                </svg>
+              </button>
+            </div>
+
+            {#if menuFor === quiz.id}
+              <!--
+                Labelled, because the three glyphs this replaced were a guess
+                every time — and one of them deletes the quiz.
+              -->
+              <!-- `tabindex` so the role is focusable in principle; focus actually
+                   lands on the first item, and the arrow keys bubble up to here. -->
+              <div class="menu" role="menu" tabindex="-1" bind:this={menuEl} onkeydown={onMenuKey}>
+                <button
+                  role="menuitem"
+                  onclick={() => {
+                    sharing = sharing === quiz.id ? null : quiz.id;
+                    closeMenu();
+                  }}>
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8 10.5V2m0 0L5 5m3-3 3 3" />
+                    <path d="M3 9.5v3.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V9.5" />
+                  </svg>
+                  Share
+                </button>
+                <button
+                  role="menuitem"
+                  onclick={() => {
+                    closeMenu();
+                    onedit(quiz);
+                  }}>
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M11.5 2.5 13.5 4.5 5.5 12.5 2.5 13.5 3.5 10.5Z" />
+                  </svg>
+                  Edit
+                </button>
+                <button
+                  role="menuitem"
+                  class="danger"
+                  onclick={() => {
+                    closeMenu();
+                    ondelete(quiz);
+                  }}>
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.2a1 1 0 0 0 1 .8h3.8a1 1 0 0 0 1-.8l.6-8.2" />
+                  </svg>
+                  Delete
+                </button>
+              </div>
+            {/if}
           </li>
           {#if sharing === quiz.id}
             <li class="panel"><Share {quiz} onclose={() => (sharing = null)} /></li>
@@ -252,8 +337,8 @@
   }
 
   .quizzes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
-  .quizzes li { display: flex; gap: 0.3rem; }
-  .quizzes li.panel { display: block; }
+  /* Anchors the actions menu to the row it belongs to. */
+  .quizzes li { position: relative; }
   .tag {
     font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--muted); padding: 0.12rem 0.4rem;
@@ -263,21 +348,37 @@
     margin: 0 0 1rem; padding: 0.7rem 0.85rem; font-size: 0.85rem; line-height: 1.5;
     color: var(--muted); background: var(--quiet); border-radius: var(--r);
   }
+  /*
+   * The card is the container now, not the button. Playing and the actions menu
+   * are two buttons inside one border — a button inside a button is not markup
+   * a browser will keep, and the menu has to live on the row, not beside it.
+   */
   .row {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r);
+  }
+  .row:hover,
+  .row--menu { border-color: var(--accent); }
+  .row:hover { background: #fbfdfb; }
+
+  .open {
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 0.8rem 0.9rem;
+    min-width: 0;
+    padding: 0.8rem 0.2rem 0.8rem 0.9rem;
     font: inherit;
     text-align: left;
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    border-radius: var(--r);
+    color: inherit;
+    background: none;
+    border: 0;
+    border-radius: var(--r) 0 0 var(--r);
     cursor: pointer;
   }
-  .row:hover { border-color: var(--accent); background: #fbfdfb; }
   .name { font-weight: 550; }
   .meta { display: flex; align-items: center; gap: 0.55rem; }
   .count { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -292,17 +393,51 @@
   }
   .best.perfect { background: var(--right); }
 
-  .icon {
+  .more {
     display: grid;
     place-items: center;
-    width: 2.2rem;
+    align-self: stretch;
+    width: 2.6rem;
     color: var(--muted);
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    border-radius: var(--r);
+    background: none;
+    border: 0;
+    border-radius: 0 var(--r) var(--r) 0;
     cursor: pointer;
   }
-  .icon svg {
+  .more svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
+  .more:hover { color: var(--ink); background: var(--quiet); }
+  .row--menu .more { color: var(--ink); background: var(--quiet); }
+
+  .menu {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    right: 0;
+    z-index: 5;
+    min-width: 10.5rem;
+    padding: 0.25rem;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    box-shadow: var(--lift-panel);
+  }
+  .menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    font: inherit;
+    font-size: 0.9rem;
+    text-align: left;
+    color: var(--ink);
+    background: none;
+    border: 0;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .menu button:hover { background: var(--quiet); }
+  .menu svg {
+    flex: none;
     width: 1rem;
     height: 1rem;
     fill: none;
@@ -310,9 +445,12 @@
     stroke-width: 1.5;
     stroke-linecap: round;
     stroke-linejoin: round;
+    color: var(--muted);
   }
-  .icon:hover { color: var(--ink); border-color: var(--hairline-strong); }
-  .icon.on { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+  /* The one item here that cannot be undone, said in the colour that means so. */
+  .menu .danger,
+  .menu .danger svg { color: var(--wrong); }
+  .menu .danger:hover { background: rgba(214, 69, 69, 0.08); }
 
   /*
    * On a phone the three icon buttons leave the name about 250px, which broke
@@ -321,8 +459,7 @@
    * are what you check once you have found it.
    */
   @media (max-width: 30rem) {
-    .row { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
-    .icon { width: 2rem; }
+    .open { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
   }
 
   .empty {

@@ -69,6 +69,8 @@
   let collapsed = $state(false);
   /** The back button is waiting on an answer before it throws the round away. */
   let confirmingQuit = $state(false);
+  /** The quiz whose deletion is waiting on an answer. */
+  let deleting = $state.raw<QuizSpec | null>(null);
   let viewState = $state<ViewState>({
     view: [0, 0, 0, 0],
     covers: true,
@@ -380,8 +382,20 @@
     play(spec);
   }
 
+  /*
+   * Deleting asks first.
+   *
+   * A quiz is a pile of choices somebody made by hand over ground they care
+   * about, and nothing here brings one back — not undo, not the account, which
+   * is told to forget it too. It used to go on a single tap of a glyph.
+   */
   function onDelete(spec: QuizSpec) {
-    session.remove(spec.id);
+    deleting = spec;
+  }
+
+  function confirmDelete() {
+    if (deleting) session.remove(deleting.id);
+    deleting = null;
   }
 
   /**
@@ -464,6 +478,16 @@
       onedit={(spec) => show({ at: 'build', editing: spec })}
       ondelete={onDelete}
     />
+    {#if deleting}
+      <Confirm
+        title={`Delete “${deleting.name}”?`}
+        body="This cannot be undone, and your best score for it goes too."
+        confirmLabel="Delete"
+        cancelLabel="Keep it"
+        onconfirm={confirmDelete}
+        oncancel={() => (deleting = null)}
+      />
+    {/if}
   {:else if !index}
     <!-- Every screen below draws a map, and none of them can without the pool. -->
     <div class="centred"><p class="hint">Loading terrain…</p></div>
