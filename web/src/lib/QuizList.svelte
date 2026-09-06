@@ -53,7 +53,7 @@
     </picture>
 
     <div class="pitch">
-      <h1>Learn the names of natural landmarks so you can tell others where you’ve been!</h1>
+      <h1>Know the terrain better than the locals.</h1>
       <div class="start">
         <button class="build" onclick={onbuild}>Build a quiz</button>
         <button class="browse" onclick={onbrowse}>Browse shared quizzes</button>
