@@ -40,15 +40,15 @@
   {/if}
 
   <nav>
+    {#if onbrowse}
+      <button class="lead" onclick={onbrowse}>Quizzes</button>
+    {:else}
+      <span class="lead here" aria-current="page">Quizzes</span>
+    {/if}
     {#if onbuild}
       <button onclick={onbuild}>Build a quiz</button>
     {:else}
       <span class="here" aria-current="page">Build a quiz</span>
-    {/if}
-    {#if onbrowse}
-      <button onclick={onbrowse}>Browse<span class="long">&nbsp;shared quizzes</span></button>
-    {:else}
-      <span class="here" aria-current="page">Browse<span class="long">&nbsp;shared quizzes</span></span>
     {/if}
   </nav>
 
@@ -117,16 +117,20 @@
   }
   nav .here {
     color: var(--ink);
-    font-weight: 600;
+    background: var(--quiet);
     cursor: default;
   }
   nav button:hover {
     color: var(--ink);
     background: var(--quiet);
   }
+  /* The way in. Everything else in the bar is somewhere you go afterwards. */
+  nav .lead {
+    color: var(--ink);
+    font-weight: 600;
+  }
 
   @media (max-width: 34rem) {
-    .long { display: none; }
     nav { gap: 0; }
     nav button,
     nav .here { padding: 0.35rem 0.4rem; font-size: 0.84rem; }

@@ -55,8 +55,8 @@
     <div class="pitch">
       <h1>Know the terrain better than the locals.</h1>
       <div class="start">
+        <button class="play" onclick={onbrowse}>Play</button>
         <button class="build" onclick={onbuild}>Build a quiz</button>
-        <button class="browse" onclick={onbrowse}>Browse shared quizzes</button>
       </div>
     </div>
   </section>
@@ -207,8 +207,13 @@
   }
 
   .start { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.2rem; }
-  .build {
-    padding: 0.8rem 1.4rem;
+  /*
+   * Playing somebody else's quiz is the shortest route to the thing this app
+   * does, and it needs no ground picked first. Building one is the answer to
+   * "not the area I wanted", which is a second visit's question.
+   */
+  .play {
+    padding: 0.8rem 2rem;
     font: inherit;
     font-weight: 650;
     color: var(--surface);
@@ -217,7 +222,7 @@
     border-radius: var(--r-md);
     cursor: pointer;
   }
-  .browse {
+  .build {
     padding: 0.8rem 1.1rem;
     font: inherit;
     color: var(--ink);
@@ -226,7 +231,7 @@
     border-radius: var(--r-md);
     cursor: pointer;
   }
-  .browse:hover { border-color: var(--accent); }
+  .build:hover { border-color: var(--accent); }
 
   .body {
     max-width: var(--measure);
