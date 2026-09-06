@@ -5,6 +5,14 @@
   --wrong: #d64545;
   --miss: #e0921a;
 
+  /*
+   * The map's violet, as `UNANSWERED` in `mapStyle.ts` — the colour a feature
+   * wears while it is still a question. Kept in step with that constant by
+   * hand; it is the one colour that means the same thing on the map and off it.
+   */
+  --violet: #6d28d9;
+  --violet-deep: #5b21b6;
+
   --ink: #1d232b;
   --paper: #eceee8;
   --surface: #fff;

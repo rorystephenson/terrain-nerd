@@ -217,11 +217,16 @@
     font: inherit;
     font-weight: 650;
     color: var(--surface);
-    background: var(--accent);
+    /* The violet the hero's own markers are wearing: on this page the button
+       and the unanswered peaks behind it are the same invitation. 7:1 on white. */
+    background: var(--violet);
     border: 0;
     border-radius: var(--r-md);
     cursor: pointer;
   }
+  /* Darker, not lighter. The map lightens a feature on hover, but that step
+     lands at 3.3:1 under white text, which a button cannot afford. */
+  .play:hover { background: var(--violet-deep); }
   .build {
     padding: 0.8rem 1.1rem;
     font: inherit;
