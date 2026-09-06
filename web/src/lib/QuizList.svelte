@@ -4,7 +4,8 @@
   import type { PoolIndex, QuizSpec } from './types.ts';
 
   type Props = {
-    index: PoolIndex;
+    /** Null until the pool index lands; this screen opens without waiting for it. */
+    index: PoolIndex | null;
     quizzes: QuizSpec[];
     /** Best first-try percentage per quiz id. */
     best: Record<string, number>;
@@ -29,7 +30,7 @@
     missing,
   }: Props = $props();
 
-  const total = $derived(index.kinds.reduce((sum, kind) => sum + kind.count, 0));
+  const total = $derived(index?.kinds.reduce((sum, kind) => sum + kind.count, 0) ?? 0);
 
   /** Which quiz has its share panel open, if any. */
   let sharing = $state<string | null>(null);
@@ -95,8 +96,11 @@
     </p>
   {/if}
 
+  <!-- Holds its line before the index arrives, so nothing above it jumps. -->
   <footer>
-    {total.toLocaleString()} named features · {index.attribution} · data {index.generatedAt}
+    {#if index}
+      {total.toLocaleString()} named features · {index.attribution} · data {index.generatedAt}
+    {/if}
   </footer>
 </div>
 
@@ -221,6 +225,7 @@
 
 
   footer {
+    min-height: 1lh;
     margin-top: 1.75rem;
     text-align: center;
     font-size: 0.75rem;

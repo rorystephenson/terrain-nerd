@@ -445,7 +445,27 @@
         repo root, and reload.
       </p>
     </div>
+  {:else if screen.at === 'list'}
+    <!--
+      In front of the pool, deliberately. Everything on this screen comes from
+      the session, not the pool; the one thing here that needs `index` is the
+      footer's feature count. Gating the screen on it too put "Loading terrain…"
+      in front of quizzes that were already in hand, for a round trip that buys
+      a footer line and nothing else.
+    -->
+    <QuizList
+      {index}
+      {quizzes}
+      {best}
+      missing={missingQuiz}
+      onbuild={() => show({ at: 'build', editing: null })}
+      onbrowse={() => show({ at: 'browse' })}
+      onplay={play}
+      onedit={(spec) => show({ at: 'build', editing: spec })}
+      ondelete={onDelete}
+    />
   {:else if !index}
+    <!-- Every screen below draws a map, and none of them can without the pool. -->
     <div class="centred"><p class="hint">Loading terrain…</p></div>
   {:else if screen.at === 'browse'}
     <Browse
@@ -535,18 +555,6 @@
     {:else}
       <div class="centred"><p class="hint">Loading the quiz…</p></div>
     {/if}
-  {:else}
-    <QuizList
-      {index}
-      {quizzes}
-      {best}
-      missing={missingQuiz}
-      onbuild={() => show({ at: 'build', editing: null })}
-      onbrowse={() => show({ at: 'browse' })}
-      onplay={play}
-      onedit={(spec) => show({ at: 'build', editing: spec })}
-      ondelete={onDelete}
-    />
   {/if}
 </main>
 
