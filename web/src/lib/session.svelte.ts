@@ -1,86 +1,62 @@
 /**
  * Where the quizzes and the scores come from, whoever you are.
  *
- * One object, so that the question "localStorage or Firestore?" is answered in
- * exactly one file and never inside a component. `App.svelte` reads
+ * One object, so that the question "whose copy is authoritative?" is answered
+ * in exactly one file and never inside a component. `App.svelte` reads
  * `session.quizzes` and `session.best` and calls `session.save()`; it does not
- * know whether anything reached a server, and it should not have to.
+ * know how any of that is stored, and it should not have to.
  *
- * The order of events matters and is deliberate:
+ * **Firestore is the only store.** There used to be a localStorage mirror
+ * alongside it, written through on every save and read synchronously at start-up
+ * so the list painted on the first frame. It is gone, and the reasons it went
+ * are worth writing down because they are not the reasons it was kept:
  *
- * 1. `init()` reads localStorage **synchronously**, so the quiz list paints on
- *    the first frame exactly as it always has. No spinner appears where there
- *    was never a wait.
- * 2. The Firebase SDK is then fetched by dynamic import — a few hundred
- *    kilobytes that the map must not be made to wait behind.
- * 3. When an account arrives, cloud snapshots take over as the source of truth.
+ * - It was never a second source of truth. Every snapshot overwrote it, so it
+ *   only ever answered with what the account had already said.
+ * - The docstrings justified it by offline resilience, which it did not provide.
+ *   There is no service worker, so the app cannot cold-start offline at all;
+ *   and *mid-session* offline is `persistentLocalCache`'s job, which queues
+ *   writes and replays them. Two caches for one job, and `cloud.ts` already
+ *   argued that two caches that disagree is worse than none.
+ * - It leaked. Catching up the mirror to the account meant uploading anything
+ *   the account lacked, so deleting a quiz server-side brought it straight back
+ *   on the next load.
  *
- * If step 2 or 3 never happens — offline, blocked storage, anonymous auth
- * switched off — everything keeps working against localStorage, which is where
- * it all was before any of this existed.
+ * What it genuinely bought was a synchronous first paint. That is now a
+ * spinner: `status` is `'loading'` until the first snapshot lands, and `ready`
+ * is how anything that needs the quizzes before it can decide what to show —
+ * `goTo` in `App.svelte` — waits for them.
+ *
+ * The cost of the trade is honest and worth knowing: with no uid there is
+ * nowhere to save, so a failed anonymous sign-in is now an error rather than a
+ * degraded mode. `#fail` is where that lands.
  */
 import { CELL_ZOOM } from './codec.ts';
 import { cellsCovering } from './grid.ts';
-import { mergeBest, planSync, type SyncPlan } from './library.ts';
-import {
-  deleteQuiz as removeLocal,
-  loadBest,
-  loadQuizzes,
-  recordBest,
-  saveQuiz as saveLocal,
-  saveQuizzes as saveLocalAll,
-} from './storage.ts';
+import { planSync, recordBest, type SyncPlan } from './library.ts';
 import type { QuizSpec } from './types.ts';
 import type { Account } from './cloud.ts';
 
 type Cloud = typeof import('./cloud.ts');
 
-/** Whether what you are looking at is only in this browser. */
-export type Status = 'local' | 'syncing' | 'synced';
+/**
+ * Whether there is anything to look at yet.
+ *
+ * `'loading'` is the honest state before the first snapshot: the list is not
+ * empty, it is unknown, and those must not look the same. `'error'` is the end
+ * of the road — no uid, or the account cannot be read — which is a real
+ * possibility now that nothing is kept locally.
+ */
+export type Status = 'loading' | 'ready' | 'error';
 
 class Session {
   account = $state.raw<Account | null>(null);
   quizzes = $state.raw<QuizSpec[]>([]);
   best = $state.raw<Record<string, number>>({});
-  status = $state<Status>('local');
+  status = $state<Status>('loading');
 
-  /**
-   * Quizzes on this device that are not in the account.
-   *
-   * Only ever populated on the second-machine path — signing in to an account
-   * that already existed. Everywhere else a quiz goes up automatically, because
-   * it is the same person on the same browser and no boundary was crossed.
-   *
-   * They are *not* second-class: they show in the list, they persist, they
-   * play. The only thing they are not is in the account, and the offer below is
-   * how that changes. Declining hides the offer and keeps the quizzes, because
-   * "don't put this in my account" and "throw this away" are different answers
-   * and only one of them was asked.
-   */
-  localOnly = $state.raw<QuizSpec[]>([]);
-
-  /** Whether to put the offer in front of them. Declining lowers it, not the quizzes. */
-  offering = $state(false);
-
-  /** What the offer is about. */
-  get offered(): QuizSpec[] {
-    return this.offering ? this.localOnly : [];
-  }
-
-  /** Set when the cloud refused us. The app carries on against localStorage. */
+  /** Set when a write was refused, or the account could not be read. */
   error = $state<string | null>(null);
-
-  /**
-   * Set while signing in to an account that may already exist.
-   *
-   * `#attach` uploads whatever this browser has that the account has not, which
-   * is right for every path except this one — here the account belongs to the
-   * same person's *other* machine, and quietly moving this machine's quizzes
-   * into it is exactly what the offer exists to avoid. The flag is set before
-   * the popup opens, because the auth listener can fire before `upgrade()`
-   * returns.
-   */
-  #switching = false;
 
   #cloud: Cloud | null = null;
   /** Resolves once the SDK has loaded, or to null if it never will. */
@@ -88,24 +64,57 @@ class Session {
   #stopAuth: (() => void) | null = null;
   #stopData: Array<() => void> = [];
 
+  /**
+   * Resolves when the quizzes have arrived, or when it is settled that they
+   * never will.
+   *
+   * This is what replaces the synchronous read at start-up. Anything that has
+   * to know whether a quiz id belongs to *you* before it can decide what to
+   * show — opening `/q/{id}` or `/build/{id}` cold — has to wait for it, or it
+   * will read an empty list and conclude the quiz is a stranger's, or gone.
+   *
+   * It resolves rather than rejects on failure, because every caller wants the
+   * same thing from it: permission to stop waiting. `status` says how it went.
+   */
+  ready: Promise<void> = Promise.resolve();
+  #settle: () => void = () => {};
+
   init(): void {
-    this.quizzes = loadQuizzes();
-    this.best = loadBest();
+    this.ready = new Promise((resolve) => {
+      this.#settle = resolve;
+    });
 
     this.#cloudReady = import('./cloud.ts')
       .then((cloud) => {
         this.#cloud = cloud;
-        this.status = 'syncing';
         cloud.onWriteError((error) => {
           this.error = error.message;
         });
-        this.#stopAuth = cloud.watchAccount((account) => this.#onAccount(account));
+        this.#stopAuth = cloud.watchAccount(
+          (account) => this.#onAccount(account),
+          (error) => this.#fail(error),
+        );
         return cloud;
       })
       .catch(() => {
-        // No cloud today. localStorage is doing the job.
+        this.#fail(new Error('Could not load the quiz store.'));
         return null;
       });
+  }
+
+  /**
+   * The end of the road, and the honest end of it.
+   *
+   * There is no local fallback to drop back to any more, so this is not a
+   * degraded mode that quietly keeps working — it is a state in which nothing
+   * can be saved. It still settles `ready`: a caller waiting to find out
+   * whether a quiz is yours is owed an answer even when the answer is "we
+   * cannot tell".
+   */
+  #fail(error: Error): void {
+    this.status = 'error';
+    this.error = error.message;
+    this.#settle();
   }
 
   dispose(): void {
@@ -134,70 +143,38 @@ class Session {
     if (!changed) return;
 
     this.#detach();
-    if (!account || !this.#cloud) return;
-    void this.#attach(this.#cloud, account.uid);
+    if (!account || !this.#cloud) {
+      // Signed out, with nothing kept locally to fall back to. Showing the
+      // previous account's quizzes until the anonymous sign-in lands would be
+      // showing somebody else's, so the list empties and `status` says why.
+      this.quizzes = [];
+      this.best = {};
+      this.status = 'loading';
+      return;
+    }
+    this.#attach(this.#cloud, account.uid);
   }
 
   /**
-   * Bring this browser and the account into agreement, then follow the account.
+   * Follow the account.
    *
-   * The catching-up is done from an explicit read rather than from the first
-   * snapshot. Hanging it off the listener made the upload depend on the
-   * listener working, and a listener that fails produces no callback at all —
-   * which looks exactly like an account that happens to be empty. One
-   * mechanism for "what is there now", another for "tell me when it changes".
+   * There is nothing to reconcile here any more. The snapshots *are* the state,
+   * so this is a subscription and not a merge — the catching-up that used to
+   * happen first was localStorage's, and it went with it. Nothing is layered on
+   * top either: every quiz the app knows about is in the account by the time it
+   * is shown, which is what makes a snapshot the whole truth.
    */
-  async #attach(cloud: Cloud, uid: string): Promise<void> {
-    try {
-      const theirs = await cloud.readAll(uid);
-
-      const missing = this.quizzes.filter(
-        (mine) => !theirs.quizzes.some((quiz) => quiz.id === mine.id),
-      );
-      if (this.#switching) {
-        // An account that already existed. These wait to be asked about.
-        this.#switching = false;
-        this.localOnly = missing;
-        this.offering = missing.length > 0;
-      } else {
-        // Same person, same browser, no boundary crossed — straight up.
-        for (const mine of missing) cloud.putQuiz(uid, mine);
-      }
-
-      const merged = mergeBest(this.best, theirs.best);
-      for (const [quizId, pct] of Object.entries(merged)) {
-        if (theirs.best[quizId] === undefined || theirs.best[quizId] < pct) {
-          cloud.putBest(uid, quizId, pct);
-        }
-      }
-      this.best = merged;
-      this.status = 'synced';
-      this.error = null;
-    } catch (error) {
-      this.status = 'local';
-      this.error = error instanceof Error ? error.message : String(error);
-      return;
-    }
-
-    const fail = (error: Error) => {
-      this.status = 'local';
-      this.error = error.message;
-    };
+  #attach(cloud: Cloud, uid: string): void {
+    const fail = (error: Error) => this.#fail(error);
 
     this.#stopData.push(
       cloud.watchQuizzes(
         uid,
         (quizzes) => {
-          // An empty account is not a reason to forget what is in this browser:
-          // the upload above may not have landed yet.
-          if (quizzes.length === 0 && this.localOnly.length === 0) return;
-          // Quizzes this device holds but the account does not are kept in the
-          // list and on disk. Writing only the account's copy over the top
-          // would delete the very quizzes we are still asking about.
-          const byId = new Map(quizzes.map((quiz) => [quiz.id, quiz]));
-          for (const quiz of this.localOnly) if (!byId.has(quiz.id)) byId.set(quiz.id, quiz);
-          this.quizzes = [...byId.values()];
-          saveLocalAll(this.quizzes);
+          this.quizzes = [...quizzes];
+          this.status = 'ready';
+          this.error = null;
+          this.#settle();
         },
         fail,
       ),
@@ -207,28 +184,50 @@ class Session {
       cloud.watchProgress(
         uid,
         (best) => {
-          this.best = mergeBest(this.best, best);
+          this.best = best;
         },
         fail,
       ),
     );
   }
 
+  /**
+   * Saves a quiz, or says why it could not be.
+   *
+   * The list is not updated here. Firestore's own cache applies a write before
+   * it leaves the machine and fires the snapshot listener with it included, so
+   * `watchQuizzes` has the quiz in hand by the time the next frame paints —
+   * updating `this.quizzes` as well would be a second copy of the same
+   * bookkeeping, which is the habit this whole change is getting rid of.
+   *
+   * With no account there is nowhere for it to go, and that has to be said. It
+   * used to be the case that this still worked, quietly, against localStorage.
+   */
   save(spec: QuizSpec): void {
-    this.quizzes = saveLocal(spec);
-    if (this.account && this.#cloud) this.#cloud.putQuiz(this.account.uid, spec);
+    if (!this.account || !this.#cloud) {
+      this.error = 'Not signed in, so this quiz could not be saved.';
+      return;
+    }
+    this.#cloud.putQuiz(this.account.uid, spec);
   }
 
   remove(id: string): void {
-    this.quizzes = removeLocal(id);
+    this.quizzes = this.quizzes.filter((quiz) => quiz.id !== id);
     if (this.account && this.#cloud) this.#cloud.dropQuiz(this.account.uid, id);
   }
 
-  /** Records a round, if it beat what was already there. Never awaited. */
+  /**
+   * Records a round, if it beat what was already there. Never awaited.
+   *
+   * Applied here as well as written, unlike `save`: the results screen reads
+   * the best score in the same tick it is set, and `recordBest` returning the
+   * same object when nothing improved is what keeps a good-but-not-best round
+   * from touching the network at all.
+   */
   recordScore(quizId: string, pct: number): void {
-    const before = this.best[quizId];
-    this.best = recordBest(this.best, quizId, pct);
-    if (this.best[quizId] === before) return;
+    const next = recordBest(this.best, quizId, pct);
+    if (next === this.best) return;
+    this.best = next;
     if (this.account && this.#cloud) this.#cloud.putBest(this.account.uid, quizId, pct);
   }
 
@@ -244,48 +243,26 @@ class Session {
     const cloud = this.#cloud;
     const mine = { quizzes: this.quizzes, best: this.best };
 
-    this.#switching = true;
-    let result;
-    try {
-      result = await cloud.upgrade();
-    } catch (error) {
-      this.#switching = false;
-      throw error;
-    }
+    const result = await cloud.upgrade();
     if (result.outcome === 'linked') {
       // Same uid, so the data never moved and there is nothing to ask about.
-      this.#switching = false;
       return null;
     }
 
-    // A different account, already populated. Scores merge on their own; the
-    // quizzes wait to be asked about.
+    // A different account, already populated. Both sides merge, and neither
+    // asks: there used to be a panel here offering to keep this device's
+    // quizzes, and it stopped being a fair question when localStorage went.
+    // "Not now" had meant "they stay on this device" — with nowhere local to
+    // stay, it would have meant "lose them on the next reload", which is not
+    // an option worth putting in front of anybody. So they go up, and the
+    // orphaned anonymous account is left behind as it always was.
     const theirs = await cloud.readAll(result.account.uid);
     const plan = planSync(mine, theirs);
+    for (const spec of plan.upload) cloud.putQuiz(result.account.uid, spec);
     for (const [quizId, pct] of Object.entries(plan.bestToPush)) {
       cloud.putBest(result.account.uid, quizId, pct);
     }
-    this.localOnly = plan.upload;
-    this.offering = plan.upload.length > 0;
     return plan;
-  }
-
-  /** Yes: put this device's quizzes into the account as well. */
-  acceptOffered(): void {
-    if (!this.account || !this.#cloud) return;
-    for (const spec of this.localOnly) this.#cloud.putQuiz(this.account.uid, spec);
-    this.localOnly = [];
-    this.offering = false;
-  }
-
-  /**
-   * Not now.
-   *
-   * Lowers the offer and keeps the quizzes exactly where they are — on this
-   * device, in the list, playable. They were never asked to be thrown away.
-   */
-  declineOffered(): void {
-    this.offering = false;
   }
 
   /** Freezes a quiz into its public form. Returns the version it became. */

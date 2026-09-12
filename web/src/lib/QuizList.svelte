@@ -1,6 +1,7 @@
 <script lang="ts">
   import Nav from './Nav.svelte';
   import Share from './Share.svelte';
+  import type { Status } from './session.svelte.ts';
   import type { PoolIndex, QuizSpec } from './types.ts';
 
   type Props = {
@@ -9,6 +10,16 @@
     quizzes: QuizSpec[];
     /** Best first-try percentage per quiz id. */
     best: Record<string, number>;
+    /**
+     * Whether the quizzes have arrived yet.
+     *
+     * They come from the account rather than from this browser, so on a cold
+     * load there is a moment where the right answer is neither a list nor "no
+     * quizzes yet" — and telling somebody who has twenty quizzes that they have
+     * none, for as long as a round trip takes, is the one thing this must not
+     * do.
+     */
+    status: Status;
     onbuild: () => void;
     onbrowse: () => void;
     onplay: (quiz: QuizSpec) => void;
@@ -22,6 +33,7 @@
     index,
     quizzes,
     best,
+    status,
     onbuild,
     onbrowse,
     onplay,
@@ -120,7 +132,17 @@
       </p>
     {/if}
 
-    {#if quizzes.length > 0}
+    {#if status === 'loading' && quizzes.length === 0}
+      <p class="waiting" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        Fetching your quizzes…
+      </p>
+    {:else if status === 'error' && quizzes.length === 0}
+      <p class="empty">
+        Your quizzes could not be fetched. They are safe — this browser just
+        cannot reach them right now. Try again in a moment.
+      </p>
+    {:else if quizzes.length > 0}
       <h2>Your quizzes</h2>
       <ul class="quizzes">
         {#each quizzes as quiz (quiz.id)}
@@ -470,6 +492,47 @@
     line-height: 1.55;
     background: rgba(0, 0, 0, 0.03);
     border-radius: var(--r-md);
+  }
+
+  /*
+   * Same box as `.empty`, so the one becoming the other does not move the page.
+   * The list below is the only thing that should change height when the
+   * quizzes land.
+   */
+  .waiting {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 1.25rem;
+    color: var(--muted);
+    line-height: 1.55;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: var(--r-md);
+  }
+
+  .spinner {
+    width: 0.9em;
+    height: 0.9em;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    opacity: 0.7;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(1turn);
+    }
+  }
+
+  /* A spinner is decoration; a reader who has asked for stillness keeps it. */
+  @media (prefers-reduced-motion: reduce) {
+    .spinner {
+      animation: none;
+    }
   }
 
   footer {

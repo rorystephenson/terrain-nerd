@@ -44,14 +44,25 @@ async function signUp(page) {
 
 const open = async (browser, url, seed) => {
   const ctx = await browser.newContext();
-  if (seed !== undefined) {
-    await ctx.addInitScript(([q]) => localStorage.setItem('terrain-nerd:quizzes', JSON.stringify(q)), [seed]);
-  }
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => globalThis.__session?.status === 'synced', { timeout: 25000 });
+  await page.waitForFunction(() => globalThis.__session?.status === 'ready', { timeout: 25000 });
+  // Saved through the app: quizzes live in the account, so planting them in
+  // localStorage would seed the migration rather than an ordinary library.
+  if (seed !== undefined) {
+    await page.evaluate((specs) => {
+      for (const spec of specs) globalThis.__session.save(spec);
+    }, seed);
+    await page.waitForFunction((n) => globalThis.__session.quizzes.length >= n, seed.length, { timeout: 15000 });
+  }
   return page;
+};
+
+/** The row's actions live behind one button now, so sharing is two clicks. */
+const openShare = async (page, name) => {
+  await page.locator(`button[aria-label="Actions for ${name}"]`).click();
+  await page.locator('div[role="menu"] button:has-text("Share")').click();
 };
 
 await reset();
@@ -62,7 +73,7 @@ const author = await open(browser, APP, quiz);
 await signUp(author);
 await author.waitForTimeout(2500);
 
-await author.locator('button[aria-label="Share The Brenta"]').click();
+await openShare(author, 'The Brenta');
 await author.locator('button:has-text("Publish and get a link")').click();
 await author.waitForSelector('input[readonly]', { timeout: 20000 });
 const link = await author.locator('input[readonly]').inputValue();

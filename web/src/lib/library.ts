@@ -10,6 +10,11 @@
  * Kept pure and Firebase-free on purpose. This is the logic that can lose
  * someone's quizzes if it is wrong, so it is the logic that gets tested.
  *
+ * `conflicts`, `adopt`, `winnerOf` and `settled` currently have no caller. They
+ * are the shape of an answer to "the same id, edited on both sides", which is
+ * only reachable by carrying a quiz between browsers by hand and has never been
+ * wired to any UI.
+ *
  * The property that makes it safe to run on *every* sign-in rather than only
  * the first is idempotence: applying a plan and re-planning yields nothing to
  * do. Best scores merge by `Math.max`, which is commutative, associative and
@@ -21,7 +26,13 @@ import type { QuizSpec } from './types.ts';
 export type Conflict = { local: QuizSpec; remote: QuizSpec };
 
 export type SyncPlan = {
-  /** Here but not in the account. Needs the owner's say-so before it goes up. */
+  /**
+   * Here but not in the account, so it goes up.
+   *
+   * This used to wait to be asked about, and the asking is gone — see
+   * `signIn`. It is still reported rather than merely done, because the caller
+   * tells the user what just happened to their quizzes.
+   */
   upload: QuizSpec[];
   /** In the account but not here. Arrives silently — it is already theirs. */
   adopt: QuizSpec[];
@@ -58,6 +69,23 @@ export function sameQuiz(a: QuizSpec, b: QuizSpec): boolean {
   if (a.name !== b.name) return false;
   if (a.features.length !== b.features.length) return false;
   return a.features.every((ref, i) => ref.id === b.features[i].id);
+}
+
+/**
+ * A score, recorded only when it beats what is already there.
+ *
+ * Returns the *same object* when it does not, which is what lets the caller
+ * tell "this was a personal best" from "this was a good round" without
+ * comparing numbers a second time — and so decide whether anything needs
+ * writing at all.
+ */
+export function recordBest(
+  best: Record<string, number>,
+  quizId: string,
+  pct: number,
+): Record<string, number> {
+  if (best[quizId] !== undefined && best[quizId] >= pct) return best;
+  return { ...best, [quizId]: pct };
 }
 
 /** The better of two scores for every quiz either side has heard of. */

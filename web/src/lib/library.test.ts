@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mergeBest, planSync, sameQuiz, winnerOf, type Side } from './library.ts';
+import { mergeBest, planSync, recordBest, sameQuiz, winnerOf, type Side } from './library.ts';
 import type { QuizSpec } from './types.ts';
 
 const quiz = (id: string, over: Partial<QuizSpec> = {}): QuizSpec => ({
@@ -119,4 +119,22 @@ test('merging scores never loses a quiz either side had heard of', () => {
   assert.deepEqual(mergeBest({}, {}), {});
   // Order cannot matter, or sync would depend on which machine went first.
   assert.deepEqual(mergeBest({ a: 1, b: 5 }, { a: 9 }), mergeBest({ a: 9 }, { a: 1, b: 5 }));
+});
+
+test('a score is recorded only when it beats what is already there', () => {
+  const first = recordBest({}, 'q1', 40);
+  assert.deepEqual(first, { q1: 40 });
+
+  const better = recordBest(first, 'q1', 90);
+  assert.deepEqual(better, { q1: 90 });
+
+  // Identity, not equality: an unbeaten score is how the caller knows there is
+  // nothing to write, so it must come back as the very same object.
+  assert.equal(recordBest(better, 'q1', 50), better);
+  assert.equal(recordBest(better, 'q1', 90), better, 'equalling it is not beating it');
+});
+
+test('scores for different quizzes do not disturb each other', () => {
+  const both = recordBest(recordBest({}, 'q1', 40), 'q2', 90);
+  assert.deepEqual(both, { q1: 40, q2: 90 });
 });

@@ -12,7 +12,8 @@
  *   - the auth listener firing on token refresh stacked a fresh set of snapshot
  *     listeners each time;
  *   - the second-machine offer was theatre, because the quizzes had already
- *     been uploaded by the time it was shown.
+ *     been uploaded by the time it was shown. (That offer is gone; the merge it
+ *     used to ask about now simply happens, and this is what checks it does.)
  *
  * Needs the emulator suite and a dev server pointed at it, in two terminals:
  *
@@ -75,19 +76,34 @@ async function signInViaPopup(page, reuseEmail) {
   await popup.waitForEvent('close', { timeout: 20000 }).catch(() => {});
 }
 
+/**
+ * A fresh browser profile with the app open on an account that has `quizzes`.
+ *
+ * They are saved through the app rather than planted in localStorage, which is
+ * no longer where quizzes live at all.
+ */
 const openApp = async (browser, quizzes) => {
   const ctx = await browser.newContext();
-  await ctx.addInitScript(([q]) => localStorage.setItem('terrain-nerd:quizzes', JSON.stringify(q)), [quizzes]);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
   await page.goto(APP, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => globalThis.__session?.status === 'synced', { timeout: 25000 });
+  await page.waitForFunction(() => globalThis.__session?.status === 'ready', { timeout: 25000 });
+
+  if (quizzes?.length) {
+    await page.evaluate((specs) => {
+      for (const spec of specs) globalThis.__session.save(spec);
+    }, quizzes);
+    await page.waitForFunction(
+      (n) => globalThis.__session.quizzes.length >= n,
+      quizzes.length,
+      { timeout: 15000 },
+    );
+  }
   return page;
 };
 const state = (page) => page.evaluate(() => ({
   uid: globalThis.__session.account.uid,
   anon: globalThis.__session.account.anonymous,
-  offered: globalThis.__session.offered.map((q) => q.name),
   quizzes: globalThis.__session.quizzes.map((q) => q.id),
   best: globalThis.__session.best,
 }));
@@ -126,19 +142,10 @@ await B.waitForTimeout(3500);
 const b2 = await state(B);
 console.log('B signed in  :', b2.uid, '| anonymous:', b2.anon);
 console.log('  landed on A\'s account :', b2.uid === a2.uid);
-console.log('  offered to keep       :', JSON.stringify(b2.offered));
 console.log('  scores now on account :', JSON.stringify(await bests(a2.uid)), '<- 80 kept, 95 gained');
-console.log('  quizzes before accept :', Object.keys(await cloud(a2.uid, 'quizzes')));
 
-// Declining must not destroy the quiz: it is still on this device, in the list.
-await B.evaluate(() => globalThis.__session.declineOffered());
-await B.waitForTimeout(1200);
-const declined = await state(B);
-console.log('  after DECLINING       : account has', Object.keys(await cloud(a2.uid, 'quizzes')),
-            '| list still shows', declined.quizzes);
-
-await B.evaluate(() => { globalThis.__session.offering = true; globalThis.__session.acceptOffered(); });
-await B.waitForTimeout(2000);
-console.log('  after ACCEPTING       : account has', Object.keys(await cloud(a2.uid, 'quizzes')));
+// Both machines' quizzes, merged without asking, and both in the list B shows.
+console.log('  quizzes on account    :', Object.keys(await cloud(a2.uid, 'quizzes')), '<- q-A and q-B');
+console.log('  list B is showing     :', b2.quizzes);
 
 await browser.close();

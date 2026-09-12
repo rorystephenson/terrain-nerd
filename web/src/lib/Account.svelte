@@ -16,7 +16,6 @@
   let note = $state<string | null>(null);
 
   const account = $derived(session.account);
-  const offered = $derived(session.offered);
 
   async function signIn() {
     busy = true;
@@ -24,8 +23,15 @@
     try {
       const plan = await session.signIn();
       // A plan comes back only on the second-machine path, where the account
-      // already existed. `offered` drives the panel below.
-      if (plan && plan.upload.length === 0) note = 'Signed in. Your quizzes are here.';
+      // already existed and this device's quizzes have just been merged into
+      // it. Worth a line either way: signing in and watching a list you did not
+      // recognise appear is unsettling without one.
+      if (plan) {
+        note =
+          plan.upload.length === 0
+            ? 'Signed in. Your quizzes are here.'
+            : `Signed in. The ${plan.upload.length === 1 ? 'quiz' : plan.upload.length + ' quizzes'} from this device ${plan.upload.length === 1 ? 'was' : 'were'} added to your account.`;
+      }
     } catch (error) {
       const code = (error as { code?: string }).code;
       // Closing the popup is not an error worth reporting back.
@@ -38,30 +44,7 @@
   }
 </script>
 
-{#if offered.length > 0}
-  <!--
-    The one moment worth interrupting for. Moving somebody's work into an
-    account they had already made on another machine is not a thing to do
-    quietly, and it is also not a thing to do without saying what it will do.
-
-    Which is why, in the nav, it does not render in the nav: a decision this
-    size squeezed into a bar would be a decision made by accident. It drops out
-    of the bar and hangs under it instead, at the width it needs.
-  -->
-  <div class="offer" class:offer--hanging={variant === 'nav'}>
-    <p>
-      You already had an account. Keep the {offered.length}
-      {offered.length === 1 ? 'quiz' : 'quizzes'} made on this device as well?
-    </p>
-    <ul>
-      {#each offered as quiz (quiz.id)}<li>{quiz.name}</li>{/each}
-    </ul>
-    <div class="row">
-      <button class="yes" onclick={() => session.acceptOffered()}>Keep them</button>
-      <button onclick={() => session.declineOffered()}>Not now</button>
-    </div>
-  </div>
-{:else if variant === 'nav'}
+{#if variant === 'nav'}
   {#if account?.anonymous}
     <button class="signin" onclick={signIn} disabled={busy}>
       {busy ? 'Signing in…' : 'Sign in'}
@@ -117,24 +100,6 @@
   }
   .link:disabled { opacity: 0.5; cursor: default; }
 
-  .offer {
-    margin: 1rem 0 0;
-    padding: 0.9rem 1rem;
-    background: var(--surface);
-    border: 1px solid var(--accent);
-    border-radius: var(--r-md);
-  }
-  /* Out of the bar's flex row and under it, still inside the nav's own box. */
-  .offer--hanging {
-    position: absolute;
-    top: 100%;
-    right: clamp(0.9rem, 3vw, 1.5rem);
-    z-index: 7;
-    width: min(22rem, calc(100vw - 2rem));
-    margin: 0.4rem 0 0;
-    box-shadow: var(--lift-panel);
-  }
-
   /* Compact enough for the bar, and still a real target on a phone. */
   .signin {
     padding: 0.38rem 0.8rem;
@@ -175,25 +140,6 @@
     background: var(--glass);
     border-radius: var(--r-pill);
   }
-  .offer p { margin: 0; font-size: 0.9rem; line-height: 1.5; }
-  .offer ul {
-    margin: 0.5rem 0 0.75rem;
-    padding-left: 1.1rem;
-    font-size: 0.85rem;
-    color: var(--muted);
-  }
-  .row { display: flex; gap: 0.5rem; }
-  .row button {
-    flex: 1;
-    padding: 0.55rem;
-    font: inherit;
-    background: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.15);
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .row .yes { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 650; }
-
   .nudge {
     margin: 0.6rem 0 0;
     padding: 0.55rem 0.7rem;

@@ -117,8 +117,17 @@ const accountOf = (user: User): Account => ({
  *
  * The cost is that this also fires on hourly token refreshes, so the caller
  * must not treat every call as a new account — see `#onAccount`.
+ *
+ * `onError` is not optional, and it is not decoration. A uid is now the only
+ * way anything gets saved at all, so a failed anonymous sign-in is the end of
+ * the road rather than a degraded mode — offline on a first visit, the
+ * anonymous provider switched off, sign-up quota reached. Swallowed, it looks
+ * exactly like an account that happens to be empty.
  */
-export function watchAccount(onChange: (account: Account | null) => void): () => void {
+export function watchAccount(
+  onChange: (account: Account | null) => void,
+  onError: (error: Error) => void,
+): () => void {
   const { auth } = connect();
   return onIdTokenChanged(auth, (user) => {
     if (user) {
@@ -126,9 +135,8 @@ export function watchAccount(onChange: (account: Account | null) => void): () =>
       return;
     }
     onChange(null);
-    signInAnonymously(auth).catch(() => {
-      // Offline, or anonymous auth switched off. Everything falls back to
-      // localStorage, which is exactly where it was before any of this.
+    signInAnonymously(auth).catch((error: unknown) => {
+      onError(error instanceof Error ? error : new Error(String(error)));
     });
   });
 }

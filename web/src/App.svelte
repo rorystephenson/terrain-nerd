@@ -58,6 +58,7 @@
 
   const quizzes = $derived(session.quizzes);
   const best = $derived(session.best);
+  const quizzesStatus = $derived(session.status);
 
   let features = $state.raw<QuizFeature[]>([]);
   /** Names of features this quiz refers to that the pool no longer holds. */
@@ -332,22 +333,32 @@
   /**
    * Turns an address into a screen.
    *
-   * A quiz id is looked for here first and in the published collection second,
-   * so your own quizzes open instantly and offline, and a stranger's link
-   * still resolves. A link that resolves to nothing lands on the list saying
-   * so, rather than on an error: the commonest reason is a quiz that has been
-   * unpublished, and that is not the visitor's mistake.
+   * A quiz id is looked for among your own first and in the published
+   * collection second, so your own quizzes open without a round trip and a
+   * stranger's link still resolves. A link that resolves to nothing lands on
+   * the list saying so, rather than on an error: the commonest reason is a quiz
+   * that has been unpublished, and that is not the visitor's mistake.
+   *
+   * Both of those lookups wait on `session.ready`, and must. The quizzes now
+   * arrive from Firestore rather than synchronously from localStorage, so at
+   * the moment this runs on a cold load the list is not empty — it is unknown.
+   * Reading it too early answered "not yours" for every id, which sent your own
+   * quiz off to the published collection and landed a draft on "that link does
+   * not lead anywhere", and opened `/build/{id}` as a blank builder instead of
+   * the quiz being edited.
    */
   async function goTo(route: Route) {
     missingQuiz = false;
     if (route.at === 'list') return show({ at: 'list' }, false);
     if (route.at === 'browse') return show({ at: 'browse' }, false);
     if (route.at === 'build') {
+      if (route.quizId) await session.ready;
       const editing = route.quizId ? (session.quizzes.find((q) => q.id === route.quizId) ?? null) : null;
       return show({ at: 'build', editing }, false);
     }
 
     if (route.version === undefined) {
+      await session.ready;
       const mine = session.quizzes.find((q) => q.id === route.quizId);
       if (mine) return show({ at: 'play', spec: mine, shared: null }, false);
     }
@@ -471,6 +482,7 @@
       {index}
       {quizzes}
       {best}
+      status={quizzesStatus}
       missing={missingQuiz}
       onbuild={() => show({ at: 'build', editing: null })}
       onbrowse={() => show({ at: 'browse' })}
