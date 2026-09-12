@@ -260,6 +260,39 @@ test('a pinned feature survives the spacing that would have dropped it', () => {
   assert.deepEqual(new Set(included.map((f) => f.id)), new Set(['near', 'big']));
 });
 
+test('tapping a summit out does not pull in the shoulder beside it', () => {
+  // The bug a user hit on a phone: deselecting one mountain selected another
+  // next to it. The spacing pass used to run over the admitted features, so a
+  // tap that removed a summit also removed it as a neighbour, and whatever it
+  // had been crowding stood up in its place. A tap changes one feature.
+  let state = setSpacing(initialState(kinds), 'peak', 2);
+  const summit = peak('big', 'Summit', 0.9, 0.9, [11, 46]);
+  const shoulder = peak('near', 'Shoulder', 0.8, 0.8, [11.002, 46]);
+  assert.deepEqual(resolve([summit, shoulder], state).included.map((f) => f.id), ['big']);
+
+  state = toggleOverride(state, summit, true);
+  assert.deepEqual(resolve([summit, shoulder], state).included, []);
+
+  // And tapping it again puts things back exactly as they were.
+  state = toggleOverride(state, summit, false);
+  assert.deepEqual(resolve([summit, shoulder], state).included.map((f) => f.id), ['big']);
+});
+
+test('a summit held out still holds its ground against a weaker neighbour', () => {
+  // What reopening leans on: the reconcile pass pins out everything the saved
+  // quiz does not have, and those pins must not hand their neighbours a way in
+  // — a quiz of one summit would reopen holding a shoulder it never asked.
+  let state = setSpacing(initialState(kinds), 'peak', 4);
+  const features = [
+    peak('big', 'Summit', 0.9, 0.9, [11, 46]),
+    peak('near', 'Shoulder', 0.85, 0.85, [11.01, 46]),
+    peak('far', 'Next valley', 0.8, 0.6, [11.2, 46]),
+  ];
+  state = toggleOverride(state, features[2], true); // drop the far one by hand
+  const { included } = resolve(features, state);
+  assert.deepEqual(included.map((f) => f.id), ['big']);
+});
+
 test('the top of the spacing scale asks about none of that kind', () => {
   // One control, the whole way: everything that qualifies at one end, nothing
   // at the other. Pins survive it, as they survive every other control here.

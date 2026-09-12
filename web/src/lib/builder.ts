@@ -211,7 +211,7 @@ export function resolve(features: readonly QuizFeature[], state: BuilderState): 
     if (isIncluded(inclusion)) admitted.push(feature);
   }
 
-  const included = space(admitted, state);
+  const included = space(features, admitted, state);
 
   // After thinning, not before: the extent has to cover what is actually asked,
   // and dropping an outlier should pull the frame in with it.
@@ -241,8 +241,22 @@ export function resolve(features: readonly QuizFeature[], state: BuilderState): 
  *
  * At the top of the scale the kind drops out entirely, pins aside. Pins survive
  * every other control here and survive this one too.
+ *
+ * **Who may crowd is the sliders' business alone.** The candidates come from
+ * `features` rather than from `admitted`, so a summit tapped out still stands
+ * where it stood and still speaks for its cluster — it is simply not asked
+ * about. Thinning `admitted` instead let a tap ripple: dropping a summit freed
+ * the ground it held and the shoulder beside it appeared, unasked for, which
+ * reads as the app selecting something you did not pick. It is the same
+ * promise `thin.ts` makes about a pin, from the other side — pinning a feature
+ * in takes no ground, pinning one out gives none up. Between the two, a tap
+ * changes one feature and nothing else.
  */
-function space(admitted: readonly QuizFeature[], state: BuilderState): QuizFeature[] {
+function space(
+  features: readonly QuizFeature[],
+  admitted: readonly QuizFeature[],
+  state: BuilderState,
+): QuizFeature[] {
   const spacing = state.spacing ?? {};
   const thinned = Object.keys(spacing).filter((kind) => (spacing[kind] ?? 0) > 0);
   if (thinned.length === 0) return [...admitted];
@@ -257,8 +271,13 @@ function space(admitted: readonly QuizFeature[], state: BuilderState): QuizFeatu
      * clothes of a considered one. Valleys are the case; they get no spacing
      * default and so no control, and this is the belt to that pair of braces.
      */
-    const mine = admitted.filter(
-      (feature) => feature.properties.kind === kind && isScored(feature),
+    const mine = features.filter(
+      (feature) =>
+        feature.properties.kind === kind &&
+        isScored(feature) &&
+        // Admitted, plus the ones held out by hand: they crowd, they are just
+        // never in the answer, which the filter over `admitted` below sees to.
+        (matchesFilter(feature, state) || state.overrides[feature.id] === 'in'),
     );
     if (mine.length === 0) continue;
     const pinned = mine.filter((feature) => state.overrides[feature.id] === 'in');
