@@ -242,15 +242,23 @@ export function resolve(features: readonly QuizFeature[], state: BuilderState): 
  * At the top of the scale the kind drops out entirely, pins aside. Pins survive
  * every other control here and survive this one too.
  *
- * **Who may crowd is the sliders' business alone.** The candidates come from
- * `features` rather than from `admitted`, so a summit tapped out still stands
- * where it stood and still speaks for its cluster — it is simply not asked
- * about. Thinning `admitted` instead let a tap ripple: dropping a summit freed
- * the ground it held and the shoulder beside it appeared, unasked for, which
- * reads as the app selecting something you did not pick. It is the same
- * promise `thin.ts` makes about a pin, from the other side — pinning a feature
- * in takes no ground, pinning one out gives none up. Between the two, a tap
- * changes one feature and nothing else.
+ * **Who crowds whom is the sliders' business alone.** The candidates are every
+ * feature the sliders admit, taken from `features` and judged by
+ * `matchesFilter`, which never reads an override. So the pass returns the same
+ * answer however much the user has tapped, and a tap adds or removes exactly
+ * the feature under the finger.
+ *
+ * Both directions were wrong before, in the same way. Thinning `admitted` meant
+ * a summit tapped out left the candidate set, freeing the ground it held, and
+ * the shoulder beside it appeared unasked for — the bug a user hit on a phone.
+ * Exempting pins from the grid inside `thin` was the mirror of it: tapping a
+ * dropped summit back in stopped it crowding, and a third, weaker peak came up
+ * with it. A selection tool cannot answer a tap by moving something else.
+ *
+ * Pins are handled here instead, on either side of the pass: they survive it
+ * unconditionally, and they are candidates in it only if the sliders would have
+ * admitted them anyway. A pin the sliders reject still takes no ground, so
+ * hand-picking an obscure summit cannot push out its neighbour.
  */
 function space(
   features: readonly QuizFeature[],
@@ -261,37 +269,35 @@ function space(
   const thinned = Object.keys(spacing).filter((kind) => (spacing[kind] ?? 0) > 0);
   if (thinned.length === 0) return [...admitted];
 
+  // A pin is a decision already made, and it holds whatever the spacing says.
   const survived = new Set<string>();
+  for (const feature of admitted) {
+    if (state.overrides[feature.id] === 'in') survived.add(feature.id);
+  }
+
   for (const kind of thinned) {
     const km = spacing[kind];
+    // The top of the scale: nothing of this kind but the pins just added.
+    if (km >= SPACING_NONE) continue;
     /*
-     * Scored features only, and the kind is skipped outright if it has none.
-     * A kind with no scores has nothing to rank a cluster by, so thinning it
-     * would come down to the id tiebreak — an arbitrary answer wearing the
-     * clothes of a considered one. Valleys are the case; they get no spacing
-     * default and so no control, and this is the belt to that pair of braces.
+     * Scored features only. A kind with no scores has nothing to rank a cluster
+     * by, so thinning it would come down to the id tiebreak — an arbitrary
+     * answer wearing the clothes of a considered one. Valleys are the case;
+     * they get no spacing default and so no control, and this is the belt to
+     * that pair of braces.
      */
-    const mine = features.filter(
+    const candidates = features.filter(
       (feature) =>
         feature.properties.kind === kind &&
         isScored(feature) &&
-        // Admitted, plus the ones held out by hand: they crowd, they are just
-        // never in the answer, which the filter over `admitted` below sees to.
-        (matchesFilter(feature, state) || state.overrides[feature.id] === 'in'),
+        matchesFilter(feature, state),
     );
-    if (mine.length === 0) continue;
-    const pinned = mine.filter((feature) => state.overrides[feature.id] === 'in');
-    if (km >= SPACING_NONE) {
-      for (const feature of pinned) survived.add(feature.id);
-      continue;
-    }
     for (const item of thin(
-      mine.map((feature) => ({
+      candidates.map((feature) => ({
         id: feature.id,
         kind,
         at: feature.properties.anchor,
         strength: strengthOf(feature),
-        locked: state.overrides[feature.id] === 'in',
       })),
       km,
     )) {

@@ -16,7 +16,6 @@ const at = (lon: number, lat: number, strength = 0.5, kind = 'peak'): Spaced => 
   kind,
   at: [lon, lat],
   strength,
-  locked: false,
 });
 
 /** A regular grid, so what survives is easy to reason about. */
@@ -165,32 +164,11 @@ test('what survives comes back in the order it went in', () => {
   assert.deepEqual(positions, [...positions].sort((x, y) => x - y));
 });
 
-test('a pin is never thinned away', () => {
-  // Everywhere else in the builder a pin survives whatever the filters say, and
-  // reopening a saved quiz depends on that holding here too.
-  const pinned = { ...at(11, 46, 0.01), locked: true };
-  const giant = at(11.001, 46.001, 1);
-  const kept = thin([giant, pinned], 5);
-  assert.ok(kept.some((i) => i.id === pinned.id), 'the pin survives a stronger neighbour');
-});
-
-test('two pins on top of each other both survive', () => {
-  const one = { ...at(11, 46, 0.5), locked: true };
-  const two = { ...at(11.0005, 46, 0.5), locked: true };
-  assert.equal(thin([one, two], 5).length, 2);
-});
-
-test('a pin takes no ground of its own', () => {
-  /*
-   * Adding something by hand must not quietly remove something else — and
-   * reopening a saved quiz pins back everything the spacing dropped, so a pin
-   * that crowded its neighbours would lose features a second way.
-   */
-  const pinned = { ...at(11, 46, 0.1), locked: true };
-  const neighbour = at(11.002, 46, 0.9);
-  const kept = thin([neighbour, pinned], 4);
-  assert.deepEqual(new Set(kept.map((i) => i.id)), new Set([pinned.id, neighbour.id]));
-});
+/*
+ * The pins that used to live here are builder-level facts now — `thin` has no
+ * notion of them, so that what it answers cannot depend on what the user
+ * tapped. See `builder.test.ts`, either side of the spacing pass.
+ */
 
 test('a kind never crowds out another kind', () => {
   // A pass and the peak above it are two different questions about one col.

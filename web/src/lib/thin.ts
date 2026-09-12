@@ -33,8 +33,15 @@
  * if two kept features were closer than the spacing, the weaker of them would
  * have the stronger one within the spacing, so it would not have been kept.
  *
- * Pure, and free of `QuizFeature`: it takes whatever carries the four things it
- * needs, so the caller keeps hold of its own objects and this stays testable
+ * It knows nothing of the builder's pins, and that is the point. Thinning
+ * answers one question — which of these features speak for their cluster —
+ * and the answer must not depend on what the user has picked by hand, or a tap
+ * on one summit would move others. Which features are *asked about* is the
+ * builder's business; see `space` in `builder.ts`, which feeds this the set the
+ * sliders admit and holds its pins to one side.
+ *
+ * Pure, and free of `QuizFeature`: it takes whatever carries the three things
+ * it needs, so the caller keeps hold of its own objects and this stays testable
  * with four-line fixtures.
  */
 
@@ -54,19 +61,6 @@ export type Spaced = {
   kind: string;
   at: LonLat;
   strength: number;
-  /**
-   * Pinned in by hand.
-   *
-   * Kept whatever the spacing says — a pin is a decision already made, and
-   * everywhere else in the builder it survives whatever the filters say.
-   *
-   * It takes no ground of its own, though: adding something by hand must not
-   * quietly remove something else. That is not only surprising, it would break
-   * reopening a saved quiz, where every feature the spacing dropped is pinned
-   * back in — each of those pins would then crowd out a neighbour that had no
-   * pin of its own, and the reopened quiz would lose features a second way.
-   */
-  locked: boolean;
 };
 
 const EARTH_RADIUS_KM = 6371.0088;
@@ -119,19 +113,16 @@ export function thin<T extends Spaced>(items: readonly T[], spacingKm: number): 
   );
 
   /*
-   * Every candidate that can crowd another goes in, survivor or not — that is
-   * what makes the answer independent of any ordering, and so monotone in the
-   * spacing.
-   *
-   * A pin is left out. It is kept whatever the spacing says and it takes no
-   * ground, so it is neither subject to the rule nor part of it.
+   * Every candidate goes in, survivor or not — that is what makes the answer
+   * independent of any ordering, and so monotone in the spacing. A feature the
+   * spacing drops still stands on the ground it stands on, and still speaks for
+   * its cluster against something weaker.
    *
    * Keyed by kind as well as position, so a pass can never crowd out the peak
    * above it: they are two different questions about the same col.
    */
   const buckets = new Map<string, T[]>();
   for (const item of items) {
-    if (item.locked) continue;
     const key = `${item.kind}:${Math.floor(item.at[0] / cellDeg)}:${Math.floor(item.at[1] / cellDeg)}`;
     const bucket = buckets.get(key);
     if (bucket) bucket.push(item);
@@ -157,5 +148,5 @@ export function thin<T extends Spaced>(items: readonly T[], spacingKm: number): 
   // Filtered in place, so what comes back is in the order it went in: the
   // caller's list is what the map draws, and reordering it would reshuffle the
   // whole selection on every drag of the slider.
-  return items.filter((item) => item.locked || !outranked(item));
+  return items.filter((item) => !outranked(item));
 }

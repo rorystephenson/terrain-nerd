@@ -293,6 +293,77 @@ test('a summit held out still holds its ground against a weaker neighbour', () =
   assert.deepEqual(included.map((f) => f.id), ['big']);
 });
 
+test('pinning a dropped summit back in raises nothing else with it', () => {
+  // The mirror of the tap-out bug, and the reason `thin` no longer knows what a
+  // pin is. Three on a line: pinning the middle one used to stop it crowding,
+  // so the weak one at the far end came up alongside it, unasked for.
+  let state = setSpacing(initialState(kinds), 'peak', 4);
+  const strong = peak('a-strong', 'Strong', 0.9, 0.9, [11, 46]);
+  const middle = peak('b-middle', 'Middle', 0.85, 0.85, [11, 46.03]); // 3.3 km along
+  const weak = peak('c-weak', 'Weak', 0.8, 0.8, [11, 46.06]); // 3.3 km past the middle
+  const features = [strong, middle, weak];
+  assert.deepEqual(resolve(features, state).included.map((f) => f.id), ['a-strong']);
+
+  state = toggleOverride(state, middle, false); // tap the dropped middle summit in
+  assert.deepEqual(resolve(features, state).included.map((f) => f.id), ['a-strong', 'b-middle']);
+});
+
+test('a pin the sliders reject takes no ground of its own', () => {
+  // Hand-picking an obscure summit must not push out the one beside it: it is
+  // not a candidate in the pass, only a passenger through it.
+  let state = setSpacing(initialState(kinds), 'peak', 5);
+  const obscure = peak('small', 'Obscure', 0.05, 0.05, [11, 46]);
+  const neighbour = peak('known', 'Known', 0.9, 0.9, [11.002, 46]);
+  state = toggleOverride(state, obscure, false);
+  const { included } = resolve([obscure, neighbour], state);
+  assert.deepEqual(new Set(included.map((f) => f.id)), new Set(['small', 'known']));
+});
+
+test('two pins on top of each other both survive', () => {
+  let state = setSpacing(initialState(kinds), 'peak', 5);
+  const one = peak('one', 'One', 0.5, 0.5, [11, 46]);
+  const two = peak('two', 'Two', 0.5, 0.5, [11.0005, 46]);
+  state = toggleOverride(state, one, false);
+  state = toggleOverride(state, two, false);
+  assert.equal(resolve([one, two], state).included.length, 2);
+});
+
+test('pins move nothing but themselves', () => {
+  /*
+   * The rule the three tests above are each one case of, stated once: whatever
+   * the user taps, the selection is the thinned set, plus what they pinned in,
+   * minus what they pinned out. Nothing else moves — which holds because the
+   * spacing pass reads only the sliders, and `matchesFilter` never reads an
+   * override.
+   */
+  const state = setSpacing(initialState(kinds), 'peak', 3);
+  const features: QuizFeature[] = [];
+  for (let row = 0; row < 4; row++) {
+    for (let column = 0; column < 4; column++) {
+      const strength = 0.6 + (row * 4 + column) / 40;
+      features.push(
+        peak(`p${row}${column}`, `Peak ${row}${column}`, strength, strength, [
+          11 + column * 0.03,
+          46 + row * 0.03,
+        ]),
+      );
+    }
+  }
+  const clean = resolve(features, state).included.map((f) => f.id);
+  assert.ok(clean.length > 1 && clean.length < features.length, 'the fixture is thinned');
+
+  // A mess of pins in both directions, including on features the pass dropped.
+  const dropped = features.filter((f) => !clean.includes(f.id));
+  let tapped = toggleOverride(state, dropped[0], false);
+  tapped = toggleOverride(tapped, dropped[1], false);
+  tapped = toggleOverride(tapped, features.find((f) => f.id === clean[0])!, true);
+
+  const got = new Set(resolve(features, tapped).included.map((f) => f.id));
+  const want = new Set([...clean, dropped[0].id, dropped[1].id]);
+  want.delete(clean[0]);
+  assert.deepEqual(got, want);
+});
+
 test('the top of the spacing scale asks about none of that kind', () => {
   // One control, the whole way: everything that qualifies at one end, nothing
   // at the other. Pins survive it, as they survive every other control here.
